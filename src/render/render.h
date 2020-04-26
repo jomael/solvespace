@@ -8,7 +8,7 @@
 #define SOLVESPACE_RENDER_H
 
 //-----------------------------------------------------------------------------
-// Interfaces and utilities common for all renderers.
+// Interfaces common for all renderers
 //-----------------------------------------------------------------------------
 
 enum class StipplePattern : uint32_t;
@@ -17,13 +17,15 @@ enum class StipplePattern : uint32_t;
 // an axonometric projection.
 class Camera {
 public:
-    size_t      width, height;
+    double      width;
+    double      height;
+    double      pixelRatio;
+    bool        gridFit;
     Vector      offset;
     Vector      projRight;
     Vector      projUp;
     double      scale;
     double      tangent;
-    bool        hasPixels;
 
     bool IsPerspective() const { return tangent != 0.0; }
 
@@ -135,12 +137,12 @@ public:
         bool Equals(const Fill &other) const;
     };
 
-    IdList<Stroke, hStroke> strokes;
-    IdList<Fill,   hFill>   fills;
-    BitmapFont bitmapFont;
+    IdList<Stroke, hStroke> strokes = {};
+    IdList<Fill,   hFill>   fills   = {};
+    BitmapFont bitmapFont = {};
 
-    Canvas() : strokes(), fills(), bitmapFont() {}
     virtual void Clear();
+    virtual ~Canvas() = default;
 
     hStroke GetStroke(const Stroke &stroke);
     hFill GetFill(const Fill &fill);
@@ -171,14 +173,22 @@ public:
     virtual std::shared_ptr<BatchCanvas> CreateBatch();
 };
 
+template<>
+struct IsHandleOracle<Canvas::hStroke> : std::true_type {};
+
+template<>
+struct IsHandleOracle<Canvas::hFill> : std::true_type {};
+
+
 // An interface for view-dependent visualization.
 class ViewportCanvas : public Canvas {
 public:
     virtual void SetCamera(const Camera &camera) = 0;
     virtual void SetLighting(const Lighting &lighting) = 0;
 
-    virtual void NewFrame() = 0;
+    virtual void StartFrame() = 0;
     virtual void FlushFrame() = 0;
+    virtual void FinishFrame() = 0;
     virtual std::shared_ptr<Pixmap> ReadFrame() = 0;
 
     virtual void GetIdent(const char **vendor, const char **renderer, const char **version) = 0;
@@ -197,7 +207,7 @@ public:
 class UiCanvas {
 public:
     std::shared_ptr<Canvas> canvas;
-    bool                    flip;
+    bool                    flip = false;
 
     void DrawLine(int x1, int y1, int x2, int y2, RgbaColor color, int width = 1,
                   int zIndex = 0);
@@ -216,17 +226,14 @@ public:
 // A canvas that performs picking against drawn geometry.
 class ObjectPicker : public Canvas {
 public:
-    Camera      camera;
+    Camera      camera      = {};
     // Configuration.
-    Point2d     point;
-    double      selRadius;
+    Point2d     point       = {};
+    double      selRadius   = 0.0;
     // Picking state.
-    double      minDistance;
-    int         maxZIndex;
-    uint32_t    position;
-
-    ObjectPicker() : camera(), point(), selRadius(),
-                     minDistance(), maxZIndex(), position() {}
+    double      minDistance = 0.0;
+    int         maxZIndex   = 0;
+    uint32_t    position    = 0;
 
     const Camera &GetCamera() const override { return camera; }
 
@@ -254,29 +261,32 @@ public:
     void DoQuad(const Vector &a, const Vector &b, const Vector &c, const Vector &d,
                 int zIndex, int comparePosition = 0);
 
-    bool Pick(std::function<void()> drawFn);
+    bool Pick(const std::function<void()> &drawFn);
 };
 
 // A canvas that renders onto a 2d surface, performing z-index sorting, occlusion testing, etc,
 // on the CPU.
-class SurfaceRenderer : public Canvas {
+class SurfaceRenderer : public ViewportCanvas {
 public:
-    Camera      camera;
-    Lighting    lighting;
+    Camera      camera   = {};
+    Lighting    lighting = {};
     // Chord tolerance, for converting beziers to pwl.
-    double      chordTolerance;
+    double      chordTolerance = 0.0;
     // Render lists.
     handle_map<hStroke, SEdgeList>   edges;
     handle_map<hStroke, SBezierList> beziers;
-    SMesh       mesh;
+    SMesh       mesh = {};
     // State.
-    BBox        bbox;
+    BBox        bbox = {};
 
-    SurfaceRenderer() : camera(), lighting(), chordTolerance(), mesh(), bbox() {}
     void Clear() override;
 
     // Canvas interface.
     const Camera &GetCamera() const override { return camera; }
+
+    // ViewportCanvas interface.
+    void SetCamera(const Camera &cam) override { this->camera = cam; }
+    void SetLighting(const Lighting &light) override { this->lighting = light; }
 
     void DrawLine(const Vector &a, const Vector &b, hStroke hcs) override;
     void DrawEdges(const SEdgeList &el, hStroke hcs) override;
@@ -318,20 +328,27 @@ public:
 };
 
 //-----------------------------------------------------------------------------
-// 2d renderers.
+// 2d renderers
 //-----------------------------------------------------------------------------
 
 class CairoRenderer : public SurfaceRenderer {
 public:
-    cairo_t     *context;
+    cairo_t     *context  = NULL;
     // Renderer configuration.
-    bool        antialias;
+    bool        antialias = false;
     // Renderer state.
     struct {
         hStroke     hcs;
-    } current;
+    } current = {};
 
-    CairoRenderer() : context(), current() {}
+    void Clear() override;
+
+    void StartFrame() override {}
+    void FlushFrame() override;
+    void FinishFrame() override {}
+    std::shared_ptr<Pixmap> ReadFrame() override;
+
+    void GetIdent(const char **vendor, const char **renderer, const char **version) override;
 
     void SelectStroke(hStroke hcs);
     void MoveTo(Vector p);
@@ -346,20 +363,21 @@ public:
     void OutputEnd() override;
 };
 
-//-----------------------------------------------------------------------------
-// 3d renderers.
-//-----------------------------------------------------------------------------
-
-// An offscreen renderer based on OpenGL framebuffers.
-class GlOffscreen {
+class CairoPixmapRenderer final : public CairoRenderer {
 public:
-    unsigned int          framebuffer;
-    unsigned int          colorRenderbuffer, depthRenderbuffer;
-    std::vector<uint8_t>  data;
+    std::shared_ptr<Pixmap>  pixmap;
 
-    bool Render(int width, int height, std::function<void()> renderFn);
-    void Clear();
+    cairo_surface_t         *surface = NULL;
+
+    void Init();
+    void Clear() override;
+
+    std::shared_ptr<Pixmap> ReadFrame() override;
 };
+
+//-----------------------------------------------------------------------------
+// Factories
+//-----------------------------------------------------------------------------
 
 std::shared_ptr<ViewportCanvas> CreateRenderer();
 

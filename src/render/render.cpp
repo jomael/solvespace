@@ -70,7 +70,7 @@ Vector Camera::VectorFromProjs(Vector rightUpForward) const {
 }
 
 Vector Camera::AlignToPixelGrid(Vector v) const {
-    if(!hasPixels) return v;
+    if(!gridFit) return v;
 
     v = ProjectPoint3(v);
     v.x = floor(v.x) + 0.5;
@@ -444,12 +444,11 @@ void ObjectPicker::DrawPixmap(std::shared_ptr<const Pixmap> pm,
     DrawQuad(o, o.Plus(u), o.Plus(u).Plus(v), o.Plus(v), hcf);
 }
 
-bool ObjectPicker::Pick(std::function<void()> drawFn) {
+bool ObjectPicker::Pick(const std::function<void()> &drawFn) {
     minDistance = VERY_POSITIVE;
     maxZIndex = INT_MIN;
 
     drawFn();
     return minDistance < selRadius;
 }
-
 }

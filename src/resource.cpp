@@ -45,7 +45,7 @@ std::string LoadStringFromGzip(const std::string &name) {
 
     // *(uint32_t *) may perform an unaligned access, so do a memcpy.
     uint32_t inflatedSize;
-    memcpy(&inflatedSize, (uint32_t *)((uintptr_t)data + deflatedSize - 4), sizeof(uint32_t));
+    memcpy(&inflatedSize, (uint8_t *)((uintptr_t)data + deflatedSize - 4), sizeof(uint32_t));
     result.resize(inflatedSize);
 
     stream.next_in = (Bytef *)data;
@@ -354,6 +354,16 @@ std::shared_ptr<Pixmap> Pixmap::Create(Format format, size_t width, size_t heigh
     return pixmap;
 }
 
+std::shared_ptr<Pixmap> Pixmap::Copy() {
+    std::shared_ptr<Pixmap> pixmap = std::make_shared<Pixmap>();
+    pixmap->format = format;
+    pixmap->width  = width;
+    pixmap->height = height;
+    pixmap->stride = stride;
+    pixmap->data   = data;
+    return pixmap;
+}
+
 //-----------------------------------------------------------------------------
 // ASCII sequence parsing
 //-----------------------------------------------------------------------------
@@ -530,7 +540,7 @@ void BitmapFont::AddGlyph(char32_t codepoint, std::shared_ptr<const Pixmap> pixm
     BitmapFont::Glyph glyph = {};
     glyph.advanceCells = (uint8_t)(pixmap->width / 8);
     glyph.position     = nextPosition++;
-    glyphs.emplace(codepoint, std::move(glyph));
+    glyphs.emplace(codepoint, glyph);
 
     for(size_t y = 0; y < pixmap->height; y++) {
         uint8_t *row = BitmapFontTextureRow(texture, glyph.position, y);
@@ -613,7 +623,8 @@ const BitmapFont::Glyph &BitmapFont::GetGlyph(char32_t codepoint) {
             }
         }
 
-        it = glyphs.emplace(codepoint, std::move(glyph)).first;
+        it = glyphs.emplace(codepoint, glyph).first;
+
         textureUpdated = true;
         return (*it).second;
     }
@@ -907,7 +918,7 @@ Vector VectorFont::GetExtents(double forCapHeight, const std::string &str) {
 }
 
 void VectorFont::Trace(double forCapHeight, Vector o, Vector u, Vector v, const std::string &str,
-                       std::function<void(Vector, Vector)> traceEdge) {
+                       const std::function<void(Vector, Vector)> &traceEdge) {
     ssassert(!IsEmpty(), "Expected a loaded font");
 
     double scale = (forCapHeight / capHeight);
@@ -934,12 +945,12 @@ void VectorFont::Trace(double forCapHeight, Vector o, Vector u, Vector v, const 
 }
 
 void VectorFont::Trace(double forCapHeight, Vector o, Vector u, Vector v, const std::string &str,
-                       std::function<void(Vector, Vector)> traceEdge, const Camera &camera) {
+                       const std::function<void(Vector, Vector)> &traceEdge, const Camera &camera) {
     ssassert(!IsEmpty(), "Expected a loaded font");
 
     // Perform grid-fitting only when the text is parallel to the view plane.
-    if(camera.hasPixels && !(u.WithMagnitude(1).Equals(camera.projRight) &&
-                             v.WithMagnitude(1).Equals(camera.projUp))) {
+    if(camera.gridFit && !(u.WithMagnitude(1).Equals(camera.projRight) &&
+                           v.WithMagnitude(1).Equals(camera.projUp))) {
         return Trace(forCapHeight, o, u, v, str, traceEdge);
     }
 
@@ -1058,8 +1069,9 @@ int PluralExpr::Token::Precedence() {
                     return 3;
 
                 case Op::NONE:
-                    ssassert(false, "Unexpected operator");
+                    ;
             }
+            ssassert(false, "Unexpected operator");
 
         case Type::QUERY:
         case Type::COLON:
@@ -1136,7 +1148,7 @@ PluralExpr::Token PluralExpr::Lex() {
 }
 
 PluralExpr::Token PluralExpr::PopToken() {
-    ssassert(stack.size() > 0, "Expected a non-empty stack");
+    ssassert(!stack.empty(), "Expected a non-empty stack");
     Token t = stack.back();
     stack.pop_back();
     return t;
@@ -1395,7 +1407,7 @@ void GettextParser::Parse() {
             }
         }
 
-        if(key.ident == "") {
+        if(key.ident.empty()) {
             ssassert(msgstrs.size() == 1,
                      "Expected exactly one header msgstr");
             ParseHeader(msgstrs[0]);
@@ -1514,7 +1526,6 @@ bool SetLocale(Predicate pred) {
         std::string filename = "locales/" + it->language + "_" + it->region + ".po";
         translations[*it] = Translation::From(LoadString(filename));
         currentTranslation = &translations[*it];
-        RefreshLocale();
         return true;
     } else {
         return false;

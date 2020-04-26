@@ -6,13 +6,13 @@
 #ifndef SOLVESPACE_GL3SHADER_H
 #define SOLVESPACE_GL3SHADER_H
 
-#ifdef WIN32
+#if defined(WIN32)
 #   define GL_APICALL /*static linkage*/
 #   define GL_GLEXT_PROTOTYPES
 #   include <GLES2/gl2.h>
 #   include <GLES2/gl2ext.h>
 #   define HAVE_GLES
-#elif __APPLE__
+#elif defined(__APPLE__)
 #   include <OpenGL/gl.h>
 #else
 #   define GL_GLEXT_PROTOTYPES
@@ -67,14 +67,14 @@ public:
 
 class Shader {
 public:
-    GLuint program;
+    GLuint program = 0;
 
     void Init(const std::string &vertexRes,
               const std::string &fragmentRes,
               const std::vector<std::pair<GLuint, std::string>> &locations = {});
     void Clear();
 
-    void SetUniformMatrix(const char *name, double *md);
+    void SetUniformMatrix(const char *name, const double *md);
     void SetUniformVector(const char *name, const Vector &v);
     void SetUniformVector(const char *name, const Vector4f &v);
     void SetUniformColor(const char *name, RgbaColor c);
@@ -104,7 +104,7 @@ public:
 
     Shader  lightShader;
     Shader  fillShader;
-    Shader *selectedShader;
+    Shader *selectedShader = NULL;
 
     void Init();
     void Clear();
@@ -152,8 +152,8 @@ public:
 
     Shader              shader;
 
-    const StippleAtlas  *atlas;
-    StipplePattern      pattern;
+    const StippleAtlas *atlas   = NULL;
+    StipplePattern      pattern = StipplePattern::CONTINUOUS;
 
     void Init(const StippleAtlas *atlas);
     void Clear();
@@ -163,8 +163,8 @@ public:
     void Draw(const Handle &handle);
     void Draw(const SEdgeList &edges);
 
-    void SetModelview(double *matrix);
-    void SetProjection(double *matrix);
+    void SetModelview(const double *matrix);
+    void SetProjection(const double *matrix);
     void SetStroke(const Canvas::Stroke &stroke, double pixel);
 };
 
@@ -192,8 +192,8 @@ public:
 
     Shader              shader;
 
-    const StippleAtlas  *atlas;
-    StipplePattern      pattern;
+    const StippleAtlas *atlas   = NULL;
+    StipplePattern      pattern = StipplePattern::CONTINUOUS;
 
     void Init(const StippleAtlas *atlas);
     void Clear();
@@ -203,8 +203,8 @@ public:
     void Draw(const Handle &handle, Canvas::DrawOutlinesAs mode);
     void Draw(const SOutlineList &outlines, Canvas::DrawOutlinesAs mode);
 
-    void SetModelview(double *matrix);
-    void SetProjection(double *matrix);
+    void SetModelview(const double *matrix);
+    void SetProjection(const double *matrix);
     void SetStroke(const Canvas::Stroke &stroke, double pixel);
 };
 
@@ -242,7 +242,7 @@ public:
     Shader  colShader;
     Shader  pointShader;
 
-    Shader  *selectedShader;
+    Shader *selectedShader = NULL;
 
     void Init();
     void Clear();
@@ -252,8 +252,8 @@ public:
     void Draw(const Handle &handle);
     void Draw(const SIndexedMesh &mesh);
 
-    void SetModelview(double *matrix);
-    void SetProjection(double *matrix);
+    void SetModelview(const double *matrix);
+    void SetProjection(const double *matrix);
 
     bool NeedsTexture() const;
 

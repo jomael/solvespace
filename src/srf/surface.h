@@ -7,8 +7,8 @@
 // Copyright 2008-2013 Jonathan Westhues.
 //-----------------------------------------------------------------------------
 
-#ifndef __SURFACE_H
-#define __SURFACE_H
+#ifndef SOLVESPACE_SURFACE_H
+#define SOLVESPACE_SURFACE_H
 
 // Utility functions, Bernstein polynomials of order 1-3 and their derivatives.
 double Bernstein(int k, int deg, double t);
@@ -63,10 +63,16 @@ public:
     uint32_t v;
 };
 
+template<>
+struct IsHandleOracle<hSSurface> : std::true_type {};
+
 class hSCurve {
 public:
     uint32_t v;
 };
+
+template<>
+struct IsHandleOracle<hSCurve> : std::true_type {};
 
 // Stuff for rational polynomial curves, of degree one to three. These are
 // our inputs, and are also calculated for certain exact surface-surface
@@ -125,7 +131,7 @@ public:
 
     void Clear();
     void ScaleSelfBy(double s);
-    void CullIdenticalBeziers();
+    void CullIdenticalBeziers(bool both=true);
     void AllIntersectionsWith(SBezierList *sblb, SPointList *spl) const;
     bool GetPlaneContainingBeziers(Vector *p, Vector *u, Vector *v,
                                         Vector *notCoplanarAt) const;
@@ -156,7 +162,7 @@ public:
     static SBezierLoopSet From(SBezierList *spcl, SPolygon *poly,
                                double chordTol,
                                bool *allClosed, SEdge *errorAt,
-                               SBezierList *openContours);
+                               SBezierLoopSet *openContours);
 
     void GetBoundingProjd(Vector u, Vector orig, double *umin, double *umax) const;
     double SignedArea();
@@ -172,7 +178,7 @@ public:
                             double chordTol,
                             bool *allClosed, SEdge *notClosedAt,
                             bool *allCoplanar, Vector *notCoplanarAt,
-                            SBezierList *openContours);
+                            SBezierLoopSet *openContours);
     void AddOpenPath(SBezier *sb);
     void Clear();
 };
@@ -282,8 +288,8 @@ public:
     Point2d         cached;
 
     static SSurface FromExtrusionOf(SBezier *spc, Vector t0, Vector t1);
-    static SSurface FromRevolutionOf(SBezier *sb, Vector pt, Vector axis,
-                                        double thetas, double thetaf);
+    static SSurface FromRevolutionOf(SBezier *sb, Vector pt, Vector axis, double thetas,
+                                     double thetaf, double dists, double distf);
     static SSurface FromPlane(Vector pt, Vector u, Vector v);
     static SSurface FromTransformationOf(SSurface *a, Vector t, Quaternion q,
                                          double scale,
@@ -376,9 +382,12 @@ public:
 
     void MakeFromExtrusionOf(SBezierLoopSet *sbls, Vector t0, Vector t1,
                              RgbaColor color);
+    bool CheckNormalAxisRelationship(SBezierLoopSet *sbls, Vector pt, Vector axis, double da, double dx);
     void MakeFromRevolutionOf(SBezierLoopSet *sbls, Vector pt, Vector axis,
                               RgbaColor color, Group *group);
-
+    void MakeFromHelicalRevolutionOf(SBezierLoopSet *sbls, Vector pt, Vector axis, RgbaColor color,
+                                     Group *group, double angles, double anglef, double dists, double distf);
+    void MakeFirstOrderRevolvedSurfaces(Vector pt, Vector axis, int i0);
     void MakeFromUnionOf(SShell *a, SShell *b);
     void MakeFromDifferenceOf(SShell *a, SShell *b);
     void MakeFromBoolean(SShell *a, SShell *b, SSurface::CombineAs type);

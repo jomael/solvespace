@@ -13,24 +13,13 @@ static System SYS;
 
 static int IsInit = 0;
 
+void SolveSpace::Platform::FatalError(const std::string &message) {
+    fprintf(stderr, "%s", message.c_str());
+    abort();
+}
+
 void Group::GenerateEquations(IdList<Equation,hEquation> *) {
     // Nothing to do for now.
-}
-
-void SolveSpace::CnfFreezeInt(uint32_t, const std::string &)
-{
-    abort();
-}
-
-uint32_t SolveSpace::CnfThawInt(uint32_t, const std::string &)
-{
-    abort();
-    return 0;
-}
-
-void SolveSpace::DoMessageBox(const char *, int, int, bool)
-{
-    abort();
 }
 
 extern "C" {
@@ -193,7 +182,7 @@ default: dbp("bad constraint type %d", sc->type); return;
         c.other2        = (sc->other2) ? true : false;
 
         c.Generate(&params);
-        if(params.n > 0) {
+        if(!params.IsEmpty()) {
             for(Param &p : params) {
                 p.h = SK.param.AddAndAssignId(&p);
                 c.valP = p.h;
@@ -220,7 +209,7 @@ default: dbp("bad constraint type %d", sc->type); return;
 
     // Now we're finally ready to solve!
     bool andFindBad = ssys->calculateFaileds ? true : false;
-    SolveResult how = SYS.Solve(&g, &(ssys->dof), &bad, andFindBad, /*andFindFree=*/false);
+    SolveResult how = SYS.Solve(&g, NULL, &(ssys->dof), &bad, andFindBad, /*andFindFree=*/false);
 
     switch(how) {
         case SolveResult::OKAY:
@@ -251,7 +240,7 @@ default: dbp("bad constraint type %d", sc->type); return;
     if(ssys->failed) {
         // Copy over any the list of problematic constraints.
         for(i = 0; i < ssys->faileds && i < bad.n; i++) {
-            ssys->failed[i] = bad.elem[i].v;
+            ssys->failed[i] = bad[i].v;
         }
         ssys->faileds = bad.n;
     }

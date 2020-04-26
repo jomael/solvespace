@@ -340,7 +340,7 @@ public:
 
     hStyle styleFor(const DRW_Entity *e) {
         // Color.
-        // TODO: which color to choose: index or RGB one?
+        //! @todo which color to choose: index or RGB one?
         int col = getColor(e);
         RgbaColor c = RgbaColor::From(DRW::dxfColors[col][0],
                                       DRW::dxfColors[col][1],
@@ -352,7 +352,7 @@ public:
         if(width < 0.0) width = 1.0;
 
         // Line stipple.
-        // TODO: Probably, we can load default autocad patterns and match it with ours.
+        //! @todo Probably, we can load default autocad patterns and match it with ours.
         std::string lineType = getLineType(e);
         StipplePattern stipple = StipplePattern::CONTINUOUS;
         for(uint32_t i = 0; i <= (uint32_t)StipplePattern::LAST; i++) {
@@ -455,8 +455,8 @@ public:
         Entity *e = SK.GetEntity(he);
         Vector pos = e->PointGetNum();
         hEntity p = findPoint(pos);
-        if(p.v == he.v) return;
-        if(p.v != Entity::NO_ENTITY.v) {
+        if(p == he) return;
+        if(p != Entity::NO_ENTITY) {
             if(constrain) {
                 Constraint::ConstrainCoincident(he, p);
             }
@@ -475,7 +475,7 @@ public:
 
     hEntity createOrGetPoint(const Vector &p) {
         hEntity he = findPoint(p);
-        if(he.v != Entity::NO_ENTITY.v) return he;
+        if(he != Entity::NO_ENTITY) return he;
 
         hRequest hr = SS.GW.AddRequest(Request::Type::DATUM_POINT, /*rememberForUndo=*/false);
         he = hr.entity(0);
@@ -1068,8 +1068,9 @@ public:
     }
 };
 
-static void ImportDwgDxf(const Platform::Path &filename,
-                         std::function<bool(const std::string &data, DRW_Interface *intf)> read) {
+static void
+ImportDwgDxf(const Platform::Path &filename,
+             const std::function<bool(const std::string &data, DRW_Interface *intf)> &read) {
     std::string fileType = ToUpper(filename.Extension());
 
     std::string data;
@@ -1100,6 +1101,7 @@ static void ImportDwgDxf(const Platform::Path &filename,
     importer.clearBlockTransform();
     if(!read(data, &importer)) {
         Error("Corrupted %s file.", fileType.c_str());
+        return;
     }
     if(importer.unknownEntities > 0) {
         Message("%u %s entities of unknown type were ignored.",

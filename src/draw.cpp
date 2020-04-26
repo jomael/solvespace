@@ -8,8 +8,8 @@
 #include "solvespace.h"
 
 bool GraphicsWindow::Selection::Equals(Selection *b) {
-    if(entity.v     != b->entity.v)     return false;
-    if(constraint.v != b->constraint.v) return false;
+    if(entity     != b->entity)     return false;
+    if(constraint != b->constraint) return false;
     return true;
 }
 
@@ -80,7 +80,7 @@ void GraphicsWindow::Selection::Draw(bool isHovered, Canvas *canvas) {
 void GraphicsWindow::ClearSelection() {
     selection.Clear();
     SS.ScheduleShowTW();
-    InvalidateGraphics();
+    Invalidate();
 }
 
 void GraphicsWindow::ClearNonexistentSelectionItems() {
@@ -98,7 +98,7 @@ void GraphicsWindow::ClearNonexistentSelectionItems() {
         }
     }
     selection.RemoveTagged();
-    if(change) InvalidateGraphics();
+    if(change) Invalidate();
 }
 
 //-----------------------------------------------------------------------------
@@ -151,7 +151,8 @@ void GraphicsWindow::MakeUnselected(Selection *stog, bool coincidentPointTrick){
             Vector ep = e->PointGetNum();
             for(s = selection.First(); s; s = selection.NextAfter(s)) {
                 if(!s->entity.v) continue;
-                if(s->entity.v == stog->entity.v) continue;
+                if(s->entity == stog->entity)
+                    continue;
                 Entity *se = SK.GetEntity(s->entity);
                 if(!se->IsPoint()) continue;
                 if(ep.Equals(se->PointGetNum())) {
@@ -211,7 +212,7 @@ void GraphicsWindow::SelectByMarquee() {
 
     Entity *e;
     for(e = SK.entity.First(); e; e = SK.entity.NextAfter(e)) {
-        if(e->group.v != SS.GW.activeGroup.v) continue;
+        if(e->group != SS.GW.activeGroup) continue;
         if(e->IsFace() || e->IsDistance()) continue;
         if(!e->IsVisible()) continue;
 
@@ -232,7 +233,7 @@ void GraphicsWindow::GroupSelection() {
     gs = {};
     int i;
     for(i = 0; i < selection.n; i++) {
-        Selection *s = &(selection.elem[i]);
+        Selection *s = &(selection[i]);
         if(s->entity.v) {
             (gs.n)++;
 
@@ -304,14 +305,14 @@ void GraphicsWindow::GroupSelection() {
 
 Camera GraphicsWindow::GetCamera() const {
     Camera camera = {};
-    camera.width     = (int)width;
-    camera.height    = (int)height;
-    camera.offset    = offset;
-    camera.projUp    = projUp;
-    camera.projRight = projRight;
-    camera.scale     = scale;
-    camera.tangent   = SS.CameraTangent();
-    camera.hasPixels = true;
+    window->GetContentSize(&camera.width, &camera.height);
+    camera.pixelRatio = window->GetDevicePixelRatio();
+    camera.gridFit    = (window->GetDevicePixelRatio() == 1);
+    camera.offset     = offset;
+    camera.projUp     = projUp;
+    camera.projRight  = projRight;
+    camera.scale      = scale;
+    camera.tangent    = SS.CameraTangent();
     return camera;
 }
 
@@ -328,11 +329,12 @@ Lighting GraphicsWindow::GetLighting() const {
 
 GraphicsWindow::Selection GraphicsWindow::ChooseFromHoverToSelect() {
     Selection sel = {};
-    if(hoverList.n == 0) return sel;
+    if(hoverList.IsEmpty())
+        return sel;
 
     Group *activeGroup = SK.GetGroup(SS.GW.activeGroup);
     int bestOrder = -1;
-    int bestZIndex;
+    int bestZIndex = 0;
     for(const Hover &hov : hoverList) {
         hGroup hg = {};
         if(hov.selection.entity.v != 0) {
@@ -457,7 +459,7 @@ void GraphicsWindow::HitTestMakeSelection(Point2d mp) {
 
     if(!sel.Equals(&hover)) {
         hover = sel;
-        InvalidateGraphics();
+        Invalidate();
     }
 }
 
@@ -544,6 +546,10 @@ void GraphicsWindow::NormalizeProjectionVectors() {
 
 void GraphicsWindow::DrawSnapGrid(Canvas *canvas) {
     if(!LockedInWorkplane()) return;
+
+    const Camera &camera = canvas->GetCamera();
+    double width  = camera.width,
+           height = camera.height;
 
     hEntity he = ActiveWorkplane();
     EntityBase *wrkpl = SK.GetEntity(he),
@@ -697,7 +703,7 @@ void GraphicsWindow::Draw(Canvas *canvas) {
     if(SS.showContourAreas) {
         for(hGroup hg : SK.groupOrder) {
             Group *g = SK.GetGroup(hg);
-            if(g->h.v != activeGroup.v) continue;
+            if(g->h != activeGroup) continue;
             if(!(g->IsVisible())) continue;
             g->DrawContourAreaLabels(canvas);
         }
@@ -816,14 +822,10 @@ void GraphicsWindow::Draw(Canvas *canvas) {
 }
 
 void GraphicsWindow::Paint() {
-    if(!canvas) return;
+    ssassert(window != NULL && canvas != NULL,
+             "Cannot paint without window and canvas");
 
     havePainted = true;
-
-    int w, h;
-    GetGraphicsWindowSize(&w, &h);
-    width = w;
-    height = h;
 
     Camera   camera   = GetCamera();
     Lighting lighting = GetLighting();
@@ -843,7 +845,7 @@ void GraphicsWindow::Paint() {
 
     canvas->SetLighting(lighting);
     canvas->SetCamera(camera);
-    canvas->NewFrame();
+    canvas->StartFrame();
     Draw(canvas.get());
     canvas->FlushFrame();
 
@@ -888,7 +890,7 @@ void GraphicsWindow::Paint() {
 
     // Also display an fps counter.
     RgbaColor renderTimeColor;
-    if(1000 / renderTime.count() < 60) {
+    if(renderTime.count() > 16.67) {
         // We aim for a steady 60fps; draw the counter in red when we're slower.
         renderTimeColor = { 255, 0, 0, 255 };
     } else {
@@ -896,9 +898,19 @@ void GraphicsWindow::Paint() {
     }
     uiCanvas.DrawBitmapText(ssprintf("rendered in %ld ms (%ld 1/s)",
                                      (long)renderTime.count(),
-                                     (long)(1000/renderTime.count())),
+                                     (long)(1000 / std::max(0.1, renderTime.count()))),
                             5, 5, renderTimeColor);
 
     canvas->FlushFrame();
+    canvas->FinishFrame();
     canvas->Clear();
+}
+
+void GraphicsWindow::Invalidate(bool clearPersistent) {
+    if(window) {
+        if(clearPersistent) {
+            persistentDirty = true;
+        }
+        window->Invalidate();
+    }
 }

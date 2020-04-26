@@ -166,7 +166,7 @@ static void ssglFillPattern(Canvas::FillPattern pattern) {
 // OpenGL 1 / compatibility profile based renderer
 //-----------------------------------------------------------------------------
 
-class OpenGl1Renderer : public ViewportCanvas {
+class OpenGl1Renderer final : public ViewportCanvas {
 public:
     Camera      camera;
     Lighting    lighting;
@@ -181,7 +181,8 @@ public:
         std::weak_ptr<const Pixmap> texture;
     } current;
 
-    OpenGl1Renderer() : camera(), lighting(), current() {}
+    // List-initialize current to work around MSVC bug 746973.
+    OpenGl1Renderer() : camera(), lighting(), current({}) {}
 
     const Camera &GetCamera() const override { return camera; }
 
@@ -219,8 +220,9 @@ public:
     void SetCamera(const Camera &camera) override;
     void SetLighting(const Lighting &lighting) override;
 
-    void NewFrame() override;
+    void StartFrame() override;
     void FlushFrame() override;
+    void FinishFrame() override;
     std::shared_ptr<Pixmap> ReadFrame() override;
 
     void GetIdent(const char **vendor, const char **renderer, const char **version) override;
@@ -248,7 +250,7 @@ void OpenGl1Renderer::UnSelectPrimitive() {
 }
 
 Canvas::Stroke *OpenGl1Renderer::SelectStroke(hStroke hcs) {
-    if(current.hcs.v == hcs.v) return current.stroke;
+    if(current.hcs == hcs) return current.stroke;
 
     Stroke *stroke = strokes.FindById(hcs);
     UnSelectPrimitive();
@@ -269,7 +271,7 @@ Canvas::Stroke *OpenGl1Renderer::SelectStroke(hStroke hcs) {
 }
 
 Canvas::Fill *OpenGl1Renderer::SelectFill(hFill hcf) {
-    if(current.hcf.v == hcf.v) return current.fill;
+    if(current.hcf == hcf) return current.fill;
 
     Fill *fill = fills.FindById(hcf);
     UnSelectPrimitive();
@@ -705,7 +707,9 @@ void OpenGl1Renderer::InvalidatePixmap(std::shared_ptr<const Pixmap> pm) {
 void OpenGl1Renderer::UpdateProjection() {
     UnSelectPrimitive();
 
-    glViewport(0, 0, camera.width, camera.height);
+    glViewport(0, 0,
+               (GLsizei)(camera.width  * camera.pixelRatio),
+               (GLsizei)(camera.height * camera.pixelRatio));
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -748,7 +752,7 @@ void OpenGl1Renderer::UpdateProjection() {
     glClear(GL_DEPTH_BUFFER_BIT);
 }
 
-void OpenGl1Renderer::NewFrame() {
+void OpenGl1Renderer::StartFrame() {
     glEnable(GL_NORMALIZE);
 
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -803,7 +807,12 @@ void OpenGl1Renderer::NewFrame() {
 
 void OpenGl1Renderer::FlushFrame() {
     UnSelectPrimitive();
+
     glFlush();
+}
+
+void OpenGl1Renderer::FinishFrame() {
+    glFinish();
 
     GLenum error = glGetError();
     if(error != GL_NO_ERROR) {
@@ -812,9 +821,12 @@ void OpenGl1Renderer::FlushFrame() {
 }
 
 std::shared_ptr<Pixmap> OpenGl1Renderer::ReadFrame() {
+    int width  = (int)(camera.width  * camera.pixelRatio);
+    int height = (int)(camera.height * camera.pixelRatio);
     std::shared_ptr<Pixmap> pixmap =
-        Pixmap::Create(Pixmap::Format::RGB, (size_t)camera.width, (size_t)camera.height);
-    glReadPixels(0, 0, camera.width, camera.height, GL_RGB, GL_UNSIGNED_BYTE, &pixmap->data[0]);
+        Pixmap::Create(Pixmap::Format::RGB, (size_t)width, (size_t)height);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, &pixmap->data[0]);
+    ssassert(glGetError() == GL_NO_ERROR, "Unexpected glReadPixels error");
     return pixmap;
 }
 

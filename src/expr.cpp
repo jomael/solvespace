@@ -361,8 +361,8 @@ Expr *Expr::PartialWrt(hParam p) const {
     Expr *da, *db;
 
     switch(op) {
-        case Op::PARAM_PTR: return From(p.v == parp->h.v ? 1 : 0);
-        case Op::PARAM:     return From(p.v == parh.v ? 1 : 0);
+        case Op::PARAM_PTR: return From(p == parp->h ? 1 : 0);
+        case Op::PARAM:     return From(p == parh ? 1 : 0);
 
         case Op::CONSTANT:  return From(0.0);
         case Op::VARIABLE:  ssassert(false, "Not supported yet");
@@ -412,8 +412,8 @@ uint64_t Expr::ParamsUsed() const {
 }
 
 bool Expr::DependsOn(hParam p) const {
-    if(op == Op::PARAM)     return (parh.v    == p.v);
-    if(op == Op::PARAM_PTR) return (parp->h.v == p.v);
+    if(op == Op::PARAM)     return (parh    == p);
+    if(op == Op::PARAM_PTR) return (parp->h == p);
 
     int c = Children();
     if(c == 1)          return a->DependsOn(p);
@@ -494,7 +494,7 @@ Expr *Expr::FoldConstants() {
 void Expr::Substitute(hParam oldh, hParam newh) {
     ssassert(op != Op::PARAM_PTR, "Expected an expression that refer to params via handles");
 
-    if(op == Op::PARAM && parh.v == oldh.v) {
+    if(op == Op::PARAM && parh == oldh) {
         parh = newh;
     }
     int c = Children();
@@ -528,11 +528,11 @@ hParam Expr::ReferencedParams(ParamList *pl) const {
         hParam pa, pb;
         pa = a->ReferencedParams(pl);
         pb = b->ReferencedParams(pl);
-        if(pa.v == NO_PARAMS.v) {
+        if(pa == NO_PARAMS) {
             return pb;
-        } else if(pb.v == NO_PARAMS.v) {
+        } else if(pb == NO_PARAMS) {
             return pa;
-        } else if(pa.v == pb.v) {
+        } else if(pa == pb) {
             return pa; // either, doesn't matter
         } else {
             return MULTIPLE_PARAMS;
@@ -605,8 +605,7 @@ public:
         bool IsError() const { return type == TokenType::ERROR; }
     };
 
-    const char        *input;
-    unsigned           inputPos;
+    std::string::const_iterator it, end;
     std::vector<Token> stack;
 
     char ReadChar();
@@ -624,7 +623,7 @@ public:
     bool Reduce(std::string *error);
     bool Parse(std::string *error, size_t reduceUntil = 0);
 
-    static Expr *Parse(const char *input, std::string *error);
+    static Expr *Parse(const std::string &input, std::string *error);
 };
 
 ExprParser::Token ExprParser::Token::From(TokenType type, Expr *expr) {
@@ -643,11 +642,15 @@ ExprParser::Token ExprParser::Token::From(TokenType type, Expr::Op op) {
 }
 
 char ExprParser::ReadChar() {
-    return input[inputPos++];
+    return *it++;
 }
 
 char ExprParser::PeekChar() {
-    return input[inputPos];
+    if(it == end) {
+        return '\0';
+    } else {
+        return *it;
+    }
 }
 
 std::string ExprParser::ReadWord() {
@@ -889,10 +892,10 @@ bool ExprParser::Parse(std::string *error, size_t reduceUntil) {
     return true;
 }
 
-Expr *ExprParser::Parse(const char *input, std::string *error) {
+Expr *ExprParser::Parse(const std::string &input, std::string *error) {
     ExprParser parser;
-    parser.input    = input;
-    parser.inputPos = 0;
+    parser.it  = input.cbegin();
+    parser.end = input.cend();
     if(!parser.Parse(error)) return NULL;
 
     Token r = parser.PopOperand(error);
@@ -900,17 +903,18 @@ Expr *ExprParser::Parse(const char *input, std::string *error) {
     return r.expr;
 }
 
-Expr *Expr::Parse(const char *input, std::string *error) {
+Expr *Expr::Parse(const std::string &input, std::string *error) {
     return ExprParser::Parse(input, error);
 }
 
-Expr *Expr::From(const char *input, bool popUpError) {
+Expr *Expr::From(const std::string &input, bool popUpError) {
     std::string error;
     Expr *e = ExprParser::Parse(input, &error);
     if(!e) {
         dbp("Parse/lex error: %s", error.c_str());
         if(popUpError) {
-            Error("Not a valid number or expression: '%s'.\n%s.", input, error.c_str());
+            Error("Not a valid number or expression: '%s'.\n%s.",
+                  input.c_str(), error.c_str());
         }
     }
     return e;

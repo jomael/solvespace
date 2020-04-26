@@ -7,46 +7,23 @@
 // Copyright 2008-2013 Jonathan Westhues.
 // Copyright 2013 Daniel Richard G. <skunk@iSKUNK.ORG>
 //-----------------------------------------------------------------------------
-#include <execinfo.h>
+#include "config.h"
 #include "solvespace.h"
+#if defined(HAVE_BACKTRACE)
+#  include BACKTRACE_HEADER
+#endif
 
 namespace SolveSpace {
 
-void dbp(const char *str, ...)
+void dbp(const char *fmt, ...)
 {
-    va_list f;
-    static char buf[1024*50];
-    va_start(f, str);
-    vsnprintf(buf, sizeof(buf), str, f);
-    va_end(f);
+    va_list va;
+    va_start(va, fmt);
+    vfprintf(stdout, fmt, va);
+    fputc('\n', stdout);
+    va_end(va);
 
-    fputs(buf, stderr);
-    fputc('\n', stderr);
-}
-
-void assert_failure(const char *file, unsigned line, const char *function,
-                    const char *condition, const char *message) {
-    fprintf(stderr, "File %s, line %u, function %s:\n", file, line, function);
-    fprintf(stderr, "Assertion '%s' failed: ((%s) == false).\n", message, condition);
-
-#ifndef LIBRARY
-    static void *ptrs[1024] = {};
-    size_t nptrs = backtrace(ptrs, sizeof(ptrs) / sizeof(ptrs[0]));
-    char **syms = backtrace_symbols(ptrs, nptrs);
-
-    fprintf(stderr, "Backtrace:\n");
-    if(syms != NULL) {
-        for(size_t i = 0; i < nptrs; i++) {
-            fprintf(stderr, "%2zu: %s\n", i, syms[i]);
-        }
-    } else {
-        for(size_t i = 0; i < nptrs; i++) {
-            fprintf(stderr, "%2zu: %p\n", i, ptrs[i]);
-        }
-    }
-#endif
-
-    abort();
+    fflush(stdout);
 }
 
 //-----------------------------------------------------------------------------
@@ -77,20 +54,7 @@ void *AllocTemporary(size_t n)
     return (void *)&h[1];
 }
 
-void FreeTemporary(void *p)
-{
-    AllocTempHeader *h = (AllocTempHeader *)p - 1;
-    if(h->prev) {
-        h->prev->next = h->next;
-    } else {
-        Head = h->next;
-    }
-    if(h->next) h->next->prev = h->prev;
-    free(h);
-}
-
-void FreeAllTemporary(void)
-{
+void FreeAllTemporary() {
     AllocTempHeader *h = Head;
     while(h) {
         AllocTempHeader *f = h;
@@ -112,8 +76,9 @@ void MemFree(void *p) {
 
 std::vector<std::string> InitPlatform(int argc, char **argv) {
     std::vector<std::string> args;
+    args.reserve(argc);
     for(int i = 0; i < argc; i++) {
-        args.push_back(argv[i]);
+        args.emplace_back(argv[i]);
     }
     return args;
 }

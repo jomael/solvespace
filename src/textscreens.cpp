@@ -57,8 +57,9 @@ void TextWindow::ScreenToggleGroupShown(int link, uint32_t v) {
 }
 void TextWindow::ScreenShowGroupsSpecial(int link, uint32_t v) {
     bool state = link == 's';
-    for(int i = 0; i < SK.groupOrder.n; i++) {
-        Group *g = SK.GetGroup(SK.groupOrder.elem[i]);
+    for(hGroup hg : SK.groupOrder) {
+        Group *g = SK.GetGroup(hg);
+
         g->visible = state;
     }
     SS.GW.persistentDirty = true;
@@ -71,7 +72,7 @@ void TextWindow::ScreenActivateGroup(int link, uint32_t v) {
 void TextWindow::ReportHowGroupSolved(hGroup hg) {
     SS.GW.ClearSuper();
     SS.TW.GoToScreen(Screen::GROUP_SOLVE_INFO);
-    SS.TW.shown.group.v = hg.v;
+    SS.TW.shown.group = hg;
     SS.ScheduleShowTW();
 }
 void TextWindow::ScreenHowGroupSolved(int link, uint32_t v) {
@@ -88,7 +89,7 @@ void TextWindow::ScreenShowEditView(int link, uint32_t v) {
     SS.TW.GoToScreen(Screen::EDIT_VIEW);
 }
 void TextWindow::ScreenGoToWebsite(int link, uint32_t v) {
-    OpenWebsite("http://solvespace.com/txtlink");
+    Platform::OpenInBrowser("http://solvespace.com/txtlink");
 }
 void TextWindow::ShowListOfGroups() {
     const char *radioTrue  = " " RADIO_TRUE  " ",
@@ -97,39 +98,57 @@ void TextWindow::ShowListOfGroups() {
                *checkFalse = " " CHECK_FALSE " ";
 
     Printf(true, "%Ft active");
-    Printf(false, "%Ft    shown ok  group-name%E");
-    int i;
+    Printf(false, "%Ft    shown dof group-name%E");
     bool afterActive = false;
-    for(i = 0; i < SK.groupOrder.n; i++) {
-        Group *g = SK.GetGroup(SK.groupOrder.elem[i]);
+    bool backgroundParity = false;
+    for(hGroup hg : SK.groupOrder) {
+        Group *g = SK.GetGroup(hg);
+
         std::string s = g->DescriptionString();
-        bool active = (g->h.v == SS.GW.activeGroup.v);
+        bool active = (g->h == SS.GW.activeGroup);
         bool shown = g->visible;
         bool ok = g->IsSolvedOkay();
-        bool ref = (g->h.v == Group::HGROUP_REFERENCES.v);
-        Printf(false, "%Bp%Fd "
+        bool warn = (g->type == Group::Type::DRAWING_WORKPLANE &&
+                     g->polyError.how != PolyError::GOOD) ||
+                    ((g->type == Group::Type::EXTRUDE ||
+                      g->type == Group::Type::LATHE) &&
+                     SK.GetGroup(g->opA)->polyError.how != PolyError::GOOD);
+        int dof = g->solved.dof;
+        char sdof[16] = "ok ";
+        if(ok && dof > 0) {
+            if(dof > 999) {
+              strcpy(sdof, "###");
+            } else {
+              sprintf(sdof, "%-3d", dof);
+            }
+        }
+        bool ref = (g->h == Group::HGROUP_REFERENCES);
+        Printf(false,
+               "%Bp%Fd "
                "%Ft%s%Fb%D%f%Ll%s%E "
                "%Fb%s%D%f%Ll%s%E  "
-               "%Fp%D%f%s%Ll%s%E  "
+               "%Fp%D%f%s%Ll%s%E "
                "%Fl%Ll%D%f%s",
-            // Alternate between light and dark backgrounds, for readability
-                (i & 1) ? 'd' : 'a',
-            // Link that activates the group
-                ref ? "   " : "",
-                g->h.v, (&TextWindow::ScreenActivateGroup),
-                ref ? "" : (active ? radioTrue : radioFalse),
-            // Link that hides or shows the group
-                afterActive ? " - " : "",
-                g->h.v, (&TextWindow::ScreenToggleGroupShown),
-                afterActive ? "" : (shown ? checkTrue : checkFalse),
-            // Link to the errors, if a problem occured while solving
-            ok ? 's' : 'x', g->h.v, (&TextWindow::ScreenHowGroupSolved),
-                ok ? "ok" : "",
-                ok ? "" : "NO",
-            // Link to a screen that gives more details on the group
-            g->h.v, (&TextWindow::ScreenSelectGroup), s.c_str());
+               // Alternate between light and dark backgrounds, for readability
+               backgroundParity ? 'd' : 'a',
+               // Link that activates the group
+               ref ? "   " : "",
+               g->h.v, (&TextWindow::ScreenActivateGroup),
+               ref ? "" : (active ? radioTrue : radioFalse),
+               // Link that hides or shows the group
+               afterActive ? " - " : "",
+               g->h.v, (&TextWindow::ScreenToggleGroupShown),
+               afterActive ? "" : (shown ? checkTrue : checkFalse),
+               // Link to the errors, if a problem occurred while solving
+               ok ? (warn ? 'm' : (dof > 0 ? 'i' : 's')) : 'x',
+               g->h.v, (&TextWindow::ScreenHowGroupSolved),
+               ok ? (warn ? "err" : sdof) : "",
+               ok ? "" : "ERR",
+               // Link to a screen that gives more details on the group
+               g->h.v, (&TextWindow::ScreenSelectGroup), s.c_str());
 
         if(active) afterActive = true;
+        backgroundParity = !backgroundParity;
     }
 
     Printf(true,  "  %Fl%Ls%fshow all%E / %Fl%Lh%fhide all%E",
@@ -191,7 +210,7 @@ void TextWindow::ScreenChangeGroupOption(int link, uint32_t v) {
             if(g->type == Group::Type::EXTRUDE) {
                 // When an extrude group is first created, it's positioned for a union
                 // extrusion. If no constraints were added, flip it when we switch between
-                // union and difference modes to avoid manual work doing the smae.
+                // union and difference modes to avoid manual work doing the same.
                 if(g->meshCombine != (Group::CombineAs)v && g->GetNumConstraints() == 0 &&
                         ((Group::CombineAs)v == Group::CombineAs::DIFFERENCE ||
                         g->meshCombine == Group::CombineAs::DIFFERENCE)) {
@@ -230,7 +249,7 @@ void TextWindow::ScreenOpacity(int link, uint32_t v) {
 
     SS.TW.ShowEditControl(11, ssprintf("%.2f", g->color.alphaF()));
     SS.TW.edit.meaning = Edit::GROUP_OPACITY;
-    SS.TW.edit.group.v = g->h.v;
+    SS.TW.edit.group = g->h;
 }
 void TextWindow::ScreenChangeExprA(int link, uint32_t v) {
     Group *g = SK.GetGroup(SS.TW.shown.group);
@@ -256,7 +275,7 @@ void TextWindow::ScreenDeleteGroup(int link, uint32_t v) {
     SS.UndoRemember();
 
     hGroup hg = SS.TW.shown.group;
-    if(hg.v == SS.GW.activeGroup.v) {
+    if(hg == SS.GW.activeGroup) {
         SS.GW.activeGroup = SK.GetGroup(SS.GW.activeGroup)->PreviousGroup()->h;
     }
 
@@ -276,7 +295,7 @@ void TextWindow::ShowGroupInfo() {
     Group *g = SK.GetGroup(shown.group);
     const char *s = "???";
 
-    if(shown.group.v == Group::HGROUP_REFERENCES.v) {
+    if(shown.group == Group::HGROUP_REFERENCES) {
         Printf(true, "%FtGROUP  %E%s", g->DescriptionString().c_str());
         goto list_items;
     } else {
@@ -289,14 +308,18 @@ void TextWindow::ShowGroupInfo() {
     if(g->type == Group::Type::LATHE) {
         Printf(true, " %Ftlathe plane sketch");
     } else if(g->type == Group::Type::EXTRUDE || g->type == Group::Type::ROTATE ||
-              g->type == Group::Type::TRANSLATE)
-    {
+              g->type == Group::Type::TRANSLATE || g->type == Group::Type::REVOLVE ||
+              g->type == Group::Type::HELIX) {
         if(g->type == Group::Type::EXTRUDE) {
             s = "extrude plane sketch";
         } else if(g->type == Group::Type::TRANSLATE) {
             s = "translate original sketch";
+        } else if(g->type == Group::Type::HELIX) {
+            s = "create helical extrusion";
         } else if(g->type == Group::Type::ROTATE) {
             s = "rotate original sketch";
+        } else if(g->type == Group::Type::REVOLVE) {
+            s = "revolve original sketch";
         }
         Printf(true, " %Ft%s%E", s);
 
@@ -347,10 +370,9 @@ void TextWindow::ShowGroupInfo() {
     }
     Printf(false, "");
 
-    if(g->type == Group::Type::EXTRUDE ||
-       g->type == Group::Type::LATHE ||
-       g->type == Group::Type::LINKED)
-    {
+    if(g->type == Group::Type::EXTRUDE || g->type == Group::Type::LATHE ||
+       g->type == Group::Type::REVOLVE || g->type == Group::Type::LINKED ||
+       g->type == Group::Type::HELIX) {
         bool un   = (g->meshCombine == Group::CombineAs::UNION);
         bool diff = (g->meshCombine == Group::CombineAs::DIFFERENCE);
         bool asy  = (g->meshCombine == Group::CombineAs::ASSEMBLE);
@@ -369,9 +391,8 @@ void TextWindow::ShowGroupInfo() {
             Group::CombineAs::ASSEMBLE,
             (asy ? RADIO_TRUE : RADIO_FALSE));
 
-        if(g->type == Group::Type::EXTRUDE ||
-           g->type == Group::Type::LATHE)
-        {
+        if(g->type == Group::Type::EXTRUDE || g->type == Group::Type::LATHE ||
+           g->type == Group::Type::REVOLVE || g->type == Group::Type::HELIX) {
             Printf(false,
                 "%Bd   %Ftcolor   %E%Bz  %Bd (%@, %@, %@) %f%D%Lf%Fl[change]%E",
                 &g->color,
@@ -382,9 +403,9 @@ void TextWindow::ShowGroupInfo() {
                 &TextWindow::ScreenOpacity);
         }
 
-        if(g->type == Group::Type::EXTRUDE ||
-           g->type == Group::Type::LATHE ||
-           g->type == Group::Type::LINKED) {
+        if(g->type == Group::Type::EXTRUDE || g->type == Group::Type::LATHE ||
+           g->type == Group::Type::REVOLVE || g->type == Group::Type::LINKED ||
+           g->type == Group::Type::HELIX) {
             Printf(false, "   %Fd%f%LP%s  suppress this group's solid model",
                 &TextWindow::ScreenChangeGroupOption,
                 g->suppress ? CHECK_TRUE : CHECK_FALSE);
@@ -428,16 +449,17 @@ list_items:
     Printf(false, "");
     Printf(false, "%Ft requests in group");
 
-    int i, a = 0;
-    for(i = 0; i < SK.request.n; i++) {
-        Request *r = &(SK.request.elem[i]);
+    int a = 0;
+    for(auto &r : SK.request) {
 
-        if(r->group.v == shown.group.v) {
-            std::string s = r->DescriptionString();
+        if(r.group == shown.group) {
+            std::string s = r.DescriptionString();
             Printf(false, "%Bp   %Fl%Ll%D%f%h%s%E",
-                (a & 1) ? 'd' : 'a',
-                r->h.v, (&TextWindow::ScreenSelectRequest),
-                &(TextWindow::ScreenHoverRequest), s.c_str());
+                   (a & 1) ? 'd' : 'a',
+                   r.h.v,
+                   (&TextWindow::ScreenSelectRequest),
+                   &(TextWindow::ScreenHoverRequest),
+                   s.c_str());
             a++;
         }
     }
@@ -446,16 +468,17 @@ list_items:
     a = 0;
     Printf(false, "");
     Printf(false, "%Ft constraints in group (%d DOF)", g->solved.dof);
-    for(i = 0; i < SK.constraint.n; i++) {
-        Constraint *c = &(SK.constraint.elem[i]);
+    for(auto &c : SK.constraint) {
 
-        if(c->group.v == shown.group.v) {
-            std::string s = c->DescriptionString();
+        if(c.group == shown.group) {
+            std::string s = c.DescriptionString();
             Printf(false, "%Bp   %Fl%Ll%D%f%h%s%E %s",
-                (a & 1) ? 'd' : 'a',
-                c->h.v, (&TextWindow::ScreenSelectConstraint),
-                (&TextWindow::ScreenHoverConstraint), s.c_str(),
-                c->reference ? "(ref)" : "");
+                   (a & 1) ? 'd' : 'a',
+                   c.h.v,
+                   (&TextWindow::ScreenSelectConstraint),
+                   (&TextWindow::ScreenHoverConstraint),
+                   s.c_str(),
+                   c.reference ? "(ref)" : "");
             a++;
         }
     }
@@ -511,7 +534,7 @@ void TextWindow::ShowGroupSolveInfo() {
     }
 
     for(int i = 0; i < g->solved.remove.n; i++) {
-        hConstraint hc = g->solved.remove.elem[i];
+        hConstraint hc = g->solved.remove[i];
         Constraint *c = SK.constraint.FindByIdNoOops(hc);
         if(!c) continue;
 
@@ -541,38 +564,57 @@ void TextWindow::ShowGroupSolveInfo() {
 void TextWindow::ScreenStepDimFinish(int link, uint32_t v) {
     SS.TW.edit.meaning = Edit::STEP_DIM_FINISH;
     std::string edit_value;
-    if(SS.TW.shown.dimIsDistance) {
-        edit_value = SS.MmToString(SS.TW.shown.dimFinish);
+    if(SS.TW.stepDim.isDistance) {
+        edit_value = SS.MmToString(SS.TW.stepDim.finish);
     } else {
-        edit_value = ssprintf("%.3f", SS.TW.shown.dimFinish);
+        edit_value = ssprintf("%.3f", SS.TW.stepDim.finish);
     }
     SS.TW.ShowEditControl(12, edit_value);
 }
 void TextWindow::ScreenStepDimSteps(int link, uint32_t v) {
     SS.TW.edit.meaning = Edit::STEP_DIM_STEPS;
-    SS.TW.ShowEditControl(12, ssprintf("%d", SS.TW.shown.dimSteps));
+    SS.TW.ShowEditControl(12, ssprintf("%d", SS.TW.stepDim.steps));
 }
 void TextWindow::ScreenStepDimGo(int link, uint32_t v) {
     hConstraint hc = SS.TW.shown.constraint;
     Constraint *c = SK.constraint.FindByIdNoOops(hc);
     if(c) {
         SS.UndoRemember();
-        double start = c->valA, finish = SS.TW.shown.dimFinish;
-        int i, n = SS.TW.shown.dimSteps;
-        for(i = 1; i <= n; i++) {
-            c = SK.GetConstraint(hc);
-            c->valA = start + ((finish - start)*i)/n;
-            SS.MarkGroupDirty(c->group);
-            SS.GenerateAll();
-            if(!SS.ActiveGroupsOkay()) {
-                // Failed to solve, so quit
-                break;
-            }
-            PaintGraphics();
+
+        double start = c->valA, finish = SS.TW.stepDim.finish;
+        SS.TW.stepDim.time = GetMilliseconds();
+        SS.TW.stepDim.step = 1;
+
+        if(!SS.TW.stepDim.timer) {
+            SS.TW.stepDim.timer = Platform::CreateTimer();
         }
+        SS.TW.stepDim.timer->onTimeout = [=] {
+            if(SS.TW.stepDim.step <= SS.TW.stepDim.steps) {
+                c->valA = start + ((finish - start)*SS.TW.stepDim.step)/SS.TW.stepDim.steps;
+                SS.MarkGroupDirty(c->group);
+                SS.GenerateAll();
+                if(!SS.ActiveGroupsOkay()) {
+                    // Failed to solve, so quit
+                    return;
+                }
+                SS.TW.stepDim.step++;
+
+                const int64_t STEP_MILLIS = 50;
+                int64_t time = GetMilliseconds();
+                if(time - SS.TW.stepDim.time < STEP_MILLIS) {
+                    SS.TW.stepDim.timer->RunAfterNextFrame();
+                } else {
+                    SS.TW.stepDim.timer->RunAfter((unsigned)(time - SS.TW.stepDim.time - STEP_MILLIS));
+                }
+                SS.TW.stepDim.time = time;
+            } else {
+                SS.TW.GoToScreen(Screen::LIST_OF_GROUPS);
+                SS.ScheduleShowTW();
+            }
+            SS.GW.Invalidate();
+        };
+        SS.TW.stepDim.timer->RunAfterNextFrame();
     }
-    InvalidateGraphics();
-    SS.TW.GoToScreen(Screen::LIST_OF_GROUPS);
 }
 void TextWindow::ShowStepDimension() {
     Constraint *c = SK.constraint.FindByIdNoOops(shown.constraint);
@@ -584,17 +626,17 @@ void TextWindow::ShowStepDimension() {
 
     Printf(true, "%FtSTEP DIMENSION%E %s", c->DescriptionString().c_str());
 
-    if(shown.dimIsDistance) {
+    if(stepDim.isDistance) {
         Printf(true,  "%Ba   %Ftstart%E    %s", SS.MmToString(c->valA).c_str());
         Printf(false, "%Bd   %Ftfinish%E   %s %Fl%Ll%f[change]%E",
-            SS.MmToString(shown.dimFinish).c_str(), &ScreenStepDimFinish);
+            SS.MmToString(stepDim.finish).c_str(), &ScreenStepDimFinish);
     } else {
         Printf(true,  "%Ba   %Ftstart%E    %@", c->valA);
         Printf(false, "%Bd   %Ftfinish%E   %@ %Fl%Ll%f[change]%E",
-            shown.dimFinish, &ScreenStepDimFinish);
+            stepDim.finish, &ScreenStepDimFinish);
     }
     Printf(false, "%Ba   %Ftsteps%E    %d %Fl%Ll%f%D[change]%E",
-        shown.dimSteps, &ScreenStepDimSteps);
+        stepDim.steps, &ScreenStepDimSteps);
 
     Printf(true, " %Fl%Ll%fstep dimension now%E", &ScreenStepDimGo);
 
@@ -615,7 +657,7 @@ void TextWindow::ScreenChangeTangentArc(int link, uint32_t v) {
         }
 
         case 'a': SS.tangentArcManual = !SS.tangentArcManual; break;
-        case 'd': SS.tangentArcDeleteOld = !SS.tangentArcDeleteOld; break;
+        case 'm': SS.tangentArcModify = !SS.tangentArcModify; break;
     }
 }
 void TextWindow::ShowTangentArc() {
@@ -634,9 +676,9 @@ void TextWindow::ShowTangentArc() {
     Printf(false, "  %Fd%f%La%s  choose radius automatically%E",
         &ScreenChangeTangentArc,
         !SS.tangentArcManual ? CHECK_TRUE : CHECK_FALSE);
-    Printf(false, "  %Fd%f%Ld%s  delete original entities afterward%E",
+    Printf(false, "  %Fd%f%Lm%s  modify original entities%E",
         &ScreenChangeTangentArc,
-        SS.tangentArcDeleteOld ? CHECK_TRUE : CHECK_FALSE);
+        SS.tangentArcModify ? CHECK_TRUE : CHECK_FALSE);
 
     Printf(false, "");
     Printf(false, "To create a tangent arc at a point,");
@@ -648,13 +690,12 @@ void TextWindow::ShowTangentArc() {
 //-----------------------------------------------------------------------------
 // The edit control is visible, and the user just pressed enter.
 //-----------------------------------------------------------------------------
-void TextWindow::EditControlDone(const char *s) {
+void TextWindow::EditControlDone(std::string s) {
     edit.showAgain = false;
 
     switch(edit.meaning) {
-        case Edit::TIMES_REPEATED: {
-            Expr *e = Expr::From(s, /*popUpError=*/true);
-            if(e) {
+        case Edit::TIMES_REPEATED:
+            if(Expr *e = Expr::From(s, /*popUpError=*/true)) {
                 SS.UndoRemember();
 
                 double ev = e->Eval();
@@ -671,16 +712,12 @@ void TextWindow::EditControlDone(const char *s) {
                 g->valA = ev;
 
                 if(g->type == Group::Type::ROTATE) {
-                    int i, c = 0;
-                    for(i = 0; i < SK.constraint.n; i++) {
-                        if(SK.constraint.elem[i].group.v == g->h.v) c++;
-                    }
                     // If the group does not contain any constraints, then
                     // set the numerical guess to space the copies uniformly
                     // over one rotation. Don't touch the guess if we're
                     // already constrained, because that would break
                     // convergence.
-                    if(c == 0) {
+                    if(g->GetNumConstraints() == 0) {
                         double copies = (g->skipFirst) ? (ev + 1) : ev;
                         SK.GetParam(g->h.param(3))->val = PI/(2*copies);
                     }
@@ -689,9 +726,9 @@ void TextWindow::EditControlDone(const char *s) {
                 SS.MarkGroupDirty(g->h);
             }
             break;
-        }
-        case Edit::GROUP_NAME: {
-            if(!*s) {
+
+        case Edit::GROUP_NAME:
+            if(s.empty()) {
                 Error(_("Group name cannot be empty"));
             } else {
                 SS.UndoRemember();
@@ -700,10 +737,9 @@ void TextWindow::EditControlDone(const char *s) {
                 g->name = s;
             }
             break;
-        }
-        case Edit::GROUP_SCALE: {
-            Expr *e = Expr::From(s, /*popUpError=*/true);
-            if(e) {
+
+        case Edit::GROUP_SCALE:
+            if(Expr *e = Expr::From(s, /*popUpError=*/true)) {
                 double ev = e->Eval();
                 if(fabs(ev) < 1e-6) {
                     Error(_("Scale cannot be zero."));
@@ -714,15 +750,16 @@ void TextWindow::EditControlDone(const char *s) {
                 }
             }
             break;
-        }
+
         case Edit::GROUP_COLOR: {
             Vector rgb;
-            if(sscanf(s, "%lf, %lf, %lf", &rgb.x, &rgb.y, &rgb.z)==3) {
+            if(sscanf(s.c_str(), "%lf, %lf, %lf", &rgb.x, &rgb.y, &rgb.z)==3) {
                 rgb = rgb.ClampWithin(0, 1);
 
                 Group *g = SK.group.FindByIdNoOops(SS.TW.shown.group);
                 if(!g) break;
-                g->color = RGBf(rgb.x, rgb.y, rgb.z);
+                g->color = RgbaColor::FromFloat((float)rgb.x, (float)rgb.y, (float)rgb.z,
+                                                g->color.alphaF());
 
                 SS.MarkGroupDirty(g->h);
                 SS.GW.ClearSuper();
@@ -731,9 +768,8 @@ void TextWindow::EditControlDone(const char *s) {
             }
             break;
         }
-        case Edit::GROUP_OPACITY: {
-            Expr *e = Expr::From(s, /*popUpError=*/true);
-            if(e) {
+        case Edit::GROUP_OPACITY:
+            if(Expr *e = Expr::From(s, /*popUpError=*/true)) {
                 double alpha = e->Eval();
                 if(alpha < 0 || alpha > 1) {
                     Error(_("Opacity must be between zero and one."));
@@ -745,42 +781,38 @@ void TextWindow::EditControlDone(const char *s) {
                 }
             }
             break;
-        }
-        case Edit::TTF_TEXT: {
+
+        case Edit::TTF_TEXT:
             SS.UndoRemember();
-            Request *r = SK.request.FindByIdNoOops(edit.request);
-            if(r) {
+            if(Request *r = SK.request.FindByIdNoOops(edit.request)) {
                 r->str = s;
                 SS.MarkGroupDirty(r->group);
             }
             break;
-        }
-        case Edit::STEP_DIM_FINISH: {
-            Expr *e = Expr::From(s, /*popUpError=*/true);
-            if(!e) {
-                break;
+
+        case Edit::STEP_DIM_FINISH:
+            if(Expr *e = Expr::From(s, /*popUpError=*/true)) {
+                if(stepDim.isDistance) {
+                    stepDim.finish = SS.ExprToMm(e);
+                } else {
+                    stepDim.finish = e->Eval();
+                }
             }
-            if(shown.dimIsDistance) {
-                shown.dimFinish = SS.ExprToMm(e);
-            } else {
-                shown.dimFinish = e->Eval();
-            }
-            break;
-        }
-        case Edit::STEP_DIM_STEPS:
-            shown.dimSteps = min(300, max(1, atoi(s)));
             break;
 
-        case Edit::TANGENT_ARC_RADIUS: {
-            Expr *e = Expr::From(s, /*popUpError=*/true);
-            if(!e) break;
-            if(e->Eval() < LENGTH_EPS) {
-                Error(_("Radius cannot be zero or negative."));
-                break;
-            }
-            SS.tangentArcRadius = SS.ExprToMm(e);
+        case Edit::STEP_DIM_STEPS:
+            stepDim.steps = min(300, max(1, atoi(s.c_str())));
             break;
-        }
+
+        case Edit::TANGENT_ARC_RADIUS:
+            if(Expr *e = Expr::From(s, /*popUpError=*/true)) {
+                if(e->Eval() < LENGTH_EPS) {
+                    Error(_("Radius cannot be zero or negative."));
+                    break;
+                }
+                SS.tangentArcRadius = SS.ExprToMm(e);
+            }
+            break;
 
         default: {
             int cnt = 0;
@@ -792,7 +824,7 @@ void TextWindow::EditControlDone(const char *s) {
             break;
         }
     }
-    InvalidateGraphics();
+    SS.GW.Invalidate();
     SS.ScheduleShowTW();
 
     if(!edit.showAgain) {

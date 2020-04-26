@@ -5,8 +5,8 @@
 // Copyright 2008-2013 Jonathan Westhues.
 //-----------------------------------------------------------------------------
 
-#ifndef __SKETCH_H
-#define __SKETCH_H
+#ifndef SOLVESPACE_SKETCH_H
+#define SOLVESPACE_SKETCH_H
 
 class hGroup;
 class hRequest;
@@ -59,6 +59,10 @@ public:
     inline hParam param(int i) const;
     inline hEquation equation(int i) const;
 };
+
+template<>
+struct IsHandleOracle<hGroup> : std::true_type {};
+
 class hRequest {
 public:
     // bits 15: 0   -- request index
@@ -69,6 +73,10 @@ public:
 
     inline bool IsFromReferences() const;
 };
+
+template<>
+struct IsHandleOracle<hRequest> : std::true_type {};
+
 class hEntity {
 public:
     // bits 15: 0   -- entity index
@@ -80,6 +88,10 @@ public:
     inline hGroup group() const;
     inline hEquation equation(int i) const;
 };
+
+template<>
+struct IsHandleOracle<hEntity> : std::true_type {};
+
 class hParam {
 public:
     // bits 15: 0   -- param index
@@ -89,26 +101,42 @@ public:
     inline hRequest request() const;
 };
 
+template<>
+struct IsHandleOracle<hParam> : std::true_type {};
+
 class hStyle {
 public:
     uint32_t v;
 };
 
-class EntityId {
-public:
+template<>
+struct IsHandleOracle<hStyle> : std::true_type {};
+
+struct EntityId {
     uint32_t v;     // entity ID, starting from 0
 };
-class EntityMap {
-public:
-    int         tag;
 
-    EntityId    h;
+template<>
+struct IsHandleOracle<EntityId> : std::true_type {};
+
+struct EntityKey {
     hEntity     input;
     int         copyNumber;
     // (input, copyNumber) gets mapped to ((Request)xxx).entity(h.v)
-
-    void Clear() {}
 };
+struct EntityKeyHash {
+    size_t operator()(const EntityKey &k) const {
+        size_t h1 = std::hash<uint32_t>{}(k.input.v),
+               h2 = std::hash<uint32_t>{}(k.copyNumber);
+        return h1 ^ (h2 << 1);
+    }
+};
+struct EntityKeyEqual {
+    bool operator()(const EntityKey &a, const EntityKey &b) const {
+        return std::tie(a.input, a.copyNumber) == std::tie(b.input, b.copyNumber);
+    }
+};
+typedef std::unordered_map<EntityKey, EntityId, EntityKeyHash, EntityKeyEqual> EntityMap;
 
 // A set of requests. Every request must have an associated group.
 class Group {
@@ -123,6 +151,7 @@ public:
         N_TRANS,
         N_ROT_AA,
         N_ROT_TRANS,
+        N_ROT_AXIS_TRANS,
     };
 
     enum class Type : uint32_t {
@@ -130,6 +159,8 @@ public:
         DRAWING_WORKPLANE             = 5001,
         EXTRUDE                       = 5100,
         LATHE                         = 5101,
+        REVOLVE                       = 5102,
+        HELIX                         = 5103,
         ROTATE                        = 5200,
         TRANSLATE                     = 5201,
         LINKED                        = 5300
@@ -185,7 +216,7 @@ public:
 
     SPolygon                polyLoops;
     SBezierLoopSetSet       bezierLoops;
-    SBezierList             bezierOpens;
+    SBezierLoopSet          bezierOpens;
 
     struct {
         PolyError       how;
@@ -214,9 +245,7 @@ public:
 
     bool forceToMesh;
 
-    IdList<EntityMap,EntityId> remap;
-    enum { REMAP_PRIME = 19477 };
-    int remapCache[REMAP_PRIME];
+    EntityMap remap;
 
     Platform::Path linkFile;
     SMesh       impMesh;
@@ -250,21 +279,24 @@ public:
         REMAP_LATHE_END    = 1007,
         REMAP_PT_TO_ARC    = 1008,
         REMAP_PT_TO_NORMAL = 1009,
+        REMAP_LATHE_ARC_CENTER = 1010,
     };
     hEntity Remap(hEntity in, int copyNumber);
     void MakeExtrusionLines(EntityList *el, hEntity in);
-    void MakeLatheCircles(IdList<Entity,hEntity> *el, IdList<Param,hParam> *param, hEntity in, Vector pt, Vector axis, int ai);
+    void MakeLatheCircles(IdList<Entity,hEntity> *el, IdList<Param,hParam> *param, hEntity in, Vector pt, Vector axis);
+    void MakeLatheSurfacesSelectable(IdList<Entity, hEntity> *el, hEntity in, Vector axis);
+    void MakeRevolveEndFaces(IdList<Entity,hEntity> *el, hEntity pt, int ai, int af);
     void MakeExtrusionTopBottomFaces(EntityList *el, hEntity pt);
     void CopyEntity(EntityList *el,
                     Entity *ep, int timesApplied, int remap,
                     hParam dx, hParam dy, hParam dz,
-                    hParam qw, hParam qvx, hParam qvy, hParam qvz,
+                    hParam qw, hParam qvx, hParam qvy, hParam qvz, hParam dist,
                     CopyAs as);
 
     void AddEq(IdList<Equation,hEquation> *l, Expr *expr, int index);
     void GenerateEquations(IdList<Equation,hEquation> *l);
     bool IsVisible();
-    int GetNumConstraints();
+    size_t GetNumConstraints();
     Vector ExtrusionGetVector();
     void ExtrusionForceVectorTo(const Vector &v);
 
@@ -292,6 +324,7 @@ public:
     SPolygon GetPolygon();
 
     static void MenuGroup(Command id);
+    static void MenuGroup(Command id, Platform::Path linkFile);
 };
 
 // A user request for some primitive or derived operation; for example a
@@ -358,6 +391,7 @@ public:
         POINT_N_ROT_TRANS      =  2011,
         POINT_N_COPY           =  2012,
         POINT_N_ROT_AA         =  2013,
+        POINT_N_ROT_AXIS_TRANS =  2014,
 
         NORMAL_IN_3D           =  3000,
         NORMAL_IN_2D           =  3001,
@@ -373,6 +407,7 @@ public:
         FACE_N_ROT_TRANS       =  5002,
         FACE_N_TRANS           =  5003,
         FACE_N_ROT_AA          =  5004,
+        FACE_ROT_NORMAL_PT     =  5005,
 
         WORKPLANE              = 10000,
         LINE_SEGMENT           = 11000,
@@ -397,7 +432,7 @@ public:
     hEntity     distance;
     // The only types that have their own params are points, normals,
     // and directions.
-    hParam      param[7];
+    hParam      param[8];
 
     // Transformed points/normals/distances have their numerical base
     Vector      numPoint;
@@ -482,6 +517,7 @@ public:
     bool HasEndpoints() const;
     Vector EndpointStart() const;
     Vector EndpointFinish() const;
+    bool IsInPlane(Vector norm, double distance) const;
 
     void RectGetPointsExprs(ExprVector *eap, ExprVector *ebp) const;
 
@@ -587,6 +623,9 @@ public:
     inline hParam param(int i) const;
 };
 
+template<>
+struct IsHandleOracle<hConstraint> : std::true_type {};
+
 class ConstraintBase {
 public:
     int         tag;
@@ -652,6 +691,15 @@ public:
 
     bool        reference;  // a ref dimension, that generates no eqs
     std::string comment;    // since comments are represented as constraints
+
+    bool Equals(const ConstraintBase &c) const {
+        return type == c.type && group == c.group && workplane == c.workplane &&
+            valA == c.valA && valP == c.valP && ptA == c.ptA && ptB == c.ptB &&
+            entityA == c.entityA && entityB == c.entityB &&
+            entityC == c.entityC && entityD == c.entityD &&
+            other == c.other && other2 == c.other2 && reference == c.reference &&
+            comment == c.comment;
+    }
 
     bool HasLabel() const;
 
@@ -725,16 +773,17 @@ public:
 
     std::string DescriptionString() const;
 
-    static hConstraint AddConstraint(Constraint *c, bool rememberForUndo);
-    static hConstraint AddConstraint(Constraint *c);
+    static hConstraint AddConstraint(Constraint *c, bool rememberForUndo = true);
     static void MenuConstrain(Command id);
     static void DeleteAllConstraintsFor(Constraint::Type type, hEntity entityA, hEntity ptA);
 
     static hConstraint ConstrainCoincident(hEntity ptA, hEntity ptB);
-    static hConstraint Constrain(Constraint::Type type, hEntity ptA, hEntity ptB, hEntity entityA);
-    static hConstraint Constrain(Constraint::Type type, hEntity ptA, hEntity ptB,
-                                    hEntity entityA, hEntity entityB,
-                                    bool other, bool other2);
+    static hConstraint Constrain(Constraint::Type type, hEntity ptA, hEntity ptB, hEntity entityA,
+                                 hEntity entityB = Entity::NO_ENTITY, bool other = false,
+                                 bool other2 = false);
+    static hConstraint TryConstrain(Constraint::Type type, hEntity ptA, hEntity ptB,
+                                    hEntity entityA, hEntity entityB = Entity::NO_ENTITY,
+                                    bool other = false, bool other2 = false);
 };
 
 class hEquation {
@@ -744,6 +793,9 @@ public:
     inline bool isFromConstraint() const;
     inline hConstraint constraint() const;
 };
+
+template<>
+struct IsHandleOracle<hEquation> : std::true_type {};
 
 class Equation {
 public:
@@ -833,7 +885,7 @@ public:
     static void CreateAllDefaultStyles();
     static void CreateDefaultStyle(hStyle h);
     static void FillDefaultStyle(Style *s, const Default *d = NULL, bool factory = false);
-    static void FreezeDefaultStyles();
+    static void FreezeDefaultStyles(Platform::SettingsRef settings);
     static void LoadFactoryDefaults();
 
     static void AssignSelectionToStyle(uint32_t v);
@@ -871,9 +923,9 @@ inline hEquation hGroup::equation(int i) const
     { hEquation r; r.v = (v << 16) | 0x80000000 | (uint32_t)i; return r; }
 
 inline bool hRequest::IsFromReferences() const {
-    if(v == Request::HREQUEST_REFERENCE_XY.v) return true;
-    if(v == Request::HREQUEST_REFERENCE_YZ.v) return true;
-    if(v == Request::HREQUEST_REFERENCE_ZX.v) return true;
+    if(*this == Request::HREQUEST_REFERENCE_XY) return true;
+    if(*this == Request::HREQUEST_REFERENCE_YZ) return true;
+    if(*this == Request::HREQUEST_REFERENCE_ZX) return true;
     return false;
 }
 inline hEntity hRequest::entity(int i) const

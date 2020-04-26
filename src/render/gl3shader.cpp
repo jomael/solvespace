@@ -9,7 +9,7 @@
 namespace SolveSpace {
 
 //-----------------------------------------------------------------------------
-// Floating point data sturctures
+// Floating point data structures
 //-----------------------------------------------------------------------------
 
 Vector2f Vector2f::From(float x, float y) {
@@ -118,6 +118,13 @@ precision highp float;
 
     GLint compiled;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if(!compiled) {
+        dbp("Failed to compile shader:\n"
+            "----8<----8<----8<----8<----8<----\n"
+            "%s\n"
+            "----8<----8<----8<----8<----8<----\n",
+            src.c_str());
+    }
     ssassert(compiled, "Cannot compile shader");
 
     return shader;
@@ -155,7 +162,7 @@ void Shader::Clear() {
     glDeleteProgram(program);
 }
 
-void Shader::SetUniformMatrix(const char *name, double *md) {
+void Shader::SetUniformMatrix(const char *name, const double *md) {
     Enable();
     float mf[16];
     for(int i = 0; i < 16; i++) mf[i] = (float)md[i];
@@ -220,7 +227,7 @@ void MeshRenderer::Init() {
             { ATTRIB_POS, "pos" },
         }
     );
-    fillShader.SetUniformTextureUnit("texture", 0);
+    fillShader.SetUniformTextureUnit("texture_", 0);
 
     selectedShader = &lightShader;
 }
@@ -237,7 +244,7 @@ MeshRenderer::Handle MeshRenderer::Add(const SMesh &m, bool dynamic) {
 
     MeshVertex *vertices = new MeshVertex[m.l.n * 3];
     for(int i = 0; i < m.l.n; i++) {
-        const STriangle &t = m.l.elem[i];
+        const STriangle &t = m.l[i];
         vertices[i * 3 + 0].pos = Vector3f::From(t.a);
         vertices[i * 3 + 1].pos = Vector3f::From(t.b);
         vertices[i * 3 + 2].pos = Vector3f::From(t.c);
@@ -272,6 +279,8 @@ void MeshRenderer::Remove(const MeshRenderer::Handle &handle) {
 
 void MeshRenderer::Draw(const MeshRenderer::Handle &handle,
                         bool useColors, RgbaColor overrideColor) {
+    if(handle.size == 0) return;
+
     selectedShader->Enable();
 
     glBindBuffer(GL_ARRAY_BUFFER, handle.vertexBuffer);
@@ -379,14 +388,15 @@ GLuint Generate(const std::vector<double> &pattern) {
 
     GLint size;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &size);
-    RgbaColor *textureData = new RgbaColor[size];
+    size /= 2;
 
+    RgbaColor *textureData = new RgbaColor[size];
     int mipCount = (int)log2(size) + 1;
     for(int mip = 0; mip < mipCount; mip++) {
         int dashI = 0;
         double dashT = 0.0;
         for(int i = 0; i < size; i++) {
-            if(pattern.size() == 0) {
+            if(pattern.empty()) {
                 textureData[i] = EncodeLengthAsFloat(0.0);
                 continue;
             }
@@ -414,8 +424,8 @@ GLuint Generate(const std::vector<double> &pattern) {
                      textureData);
         size /= 2;
     }
-
     delete []textureData;
+
     return texture;
 }
 
@@ -453,7 +463,7 @@ void EdgeRenderer::Init(const StippleAtlas *a) {
         {
             { ATTRIB_POS, "pos" },
             { ATTRIB_LOC, "loc" },
-            { ATTRIB_TAN, "tan" }
+            { ATTRIB_TAN, "tgt" }
         }
     );
 }
@@ -476,8 +486,8 @@ EdgeRenderer::Handle EdgeRenderer::Add(const SEdgeList &edges, bool dynamic) {
     uint32_t curVertex = 0;
     uint32_t curIndex = 0;
     for(int i = 0; i < edges.l.n; i++) {
-        const SEdge &curr = edges.l.elem[i];
-        const SEdge &next = edges.l.elem[(i + 1) % edges.l.n];
+        const SEdge &curr = edges.l[i];
+        const SEdge &next = edges.l[(i + 1) % edges.l.n];
 
         // 3d positions
         Vector3f a = Vector3f::From(curr.a);
@@ -575,6 +585,8 @@ void EdgeRenderer::Remove(const EdgeRenderer::Handle &handle) {
 }
 
 void EdgeRenderer::Draw(const EdgeRenderer::Handle &handle) {
+    if(handle.size == 0) return;
+
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, atlas->GetTexture(pattern));
     shader.SetUniformTextureUnit("pattern", 1);
@@ -610,11 +622,11 @@ void EdgeRenderer::Draw(const SEdgeList &edges) {
     Remove(handle);
 }
 
-void EdgeRenderer::SetModelview(double *matrix) {
+void EdgeRenderer::SetModelview(const double *matrix) {
     shader.SetUniformMatrix("modelview", matrix);
 }
 
-void EdgeRenderer::SetProjection(double *matrix) {
+void EdgeRenderer::SetProjection(const double *matrix) {
     shader.SetUniformMatrix("projection", matrix);
 }
 
@@ -638,7 +650,7 @@ void OutlineRenderer::Init(const StippleAtlas *a) {
         {
             { ATTRIB_POS, "pos" },
             { ATTRIB_LOC, "loc" },
-            { ATTRIB_TAN, "tan" },
+            { ATTRIB_TAN, "tgt" },
             { ATTRIB_NOL, "nol" },
             { ATTRIB_NOR, "nor" }
         }
@@ -663,8 +675,8 @@ OutlineRenderer::Handle OutlineRenderer::Add(const SOutlineList &outlines, bool 
     uint32_t curIndex = 0;
 
     for(int i = 0; i < outlines.l.n; i++) {
-        const SOutline &curr = outlines.l.elem[i];
-        const SOutline &next = outlines.l.elem[(i + 1) % outlines.l.n];
+        const SOutline &curr = outlines.l[i];
+        const SOutline &next = outlines.l[(i + 1) % outlines.l.n];
 
         // 3d positions
         Vector3f a = Vector3f::From(curr.a);
@@ -774,6 +786,8 @@ void OutlineRenderer::Remove(const OutlineRenderer::Handle &handle) {
 }
 
 void OutlineRenderer::Draw(const OutlineRenderer::Handle &handle, Canvas::DrawOutlinesAs mode) {
+    if(handle.size == 0) return;
+
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, atlas->GetTexture(pattern));
     shader.SetUniformTextureUnit("pattern", 1);
@@ -820,11 +834,11 @@ void OutlineRenderer::Draw(const SOutlineList &outlines, Canvas::DrawOutlinesAs 
     Remove(handle);
 }
 
-void OutlineRenderer::SetModelview(double *matrix) {
+void OutlineRenderer::SetModelview(const double *matrix) {
     shader.SetUniformMatrix("modelview", matrix);
 }
 
-void OutlineRenderer::SetProjection(double *matrix) {
+void OutlineRenderer::SetProjection(const double *matrix) {
     shader.SetUniformMatrix("projection", matrix);
 }
 
@@ -926,8 +940,7 @@ void IndexedMeshRenderer::Init() {
     colShader.Init(
         "shaders/imesh.vert", "shaders/imesh.frag",
         {
-            { ATTRIB_POS, "pos" },
-            { ATTRIB_TEX, "tex" }
+            { ATTRIB_POS, "pos" }
         }
     );
     texShader.Init(
@@ -952,8 +965,8 @@ void IndexedMeshRenderer::Init() {
         }
     );
 
-    texShader.SetUniformTextureUnit("texture", 0);
-    texaShader.SetUniformTextureUnit("texture", 0);
+    texShader.SetUniformTextureUnit("texture_", 0);
+    texaShader.SetUniformTextureUnit("texture_", 0);
     selectedShader = &colShader;
 }
 
@@ -981,15 +994,17 @@ IndexedMeshRenderer::Handle IndexedMeshRenderer::Add(const SIndexedMesh &m, bool
     return handle;
 }
 
-void IndexedMeshRenderer::Remove(const IndexedMeshRenderer::Handle &m) {
-    glDeleteBuffers(1, &m.vertexBuffer);
-    glDeleteBuffers(1, &m.indexBuffer);
+void IndexedMeshRenderer::Remove(const IndexedMeshRenderer::Handle &handle) {
+    glDeleteBuffers(1, &handle.vertexBuffer);
+    glDeleteBuffers(1, &handle.indexBuffer);
 }
 
-void IndexedMeshRenderer::Draw(const IndexedMeshRenderer::Handle &m) {
+void IndexedMeshRenderer::Draw(const IndexedMeshRenderer::Handle &handle) {
+    if(handle.size == 0) return;
+
     selectedShader->Enable();
 
-    glBindBuffer(GL_ARRAY_BUFFER, m.vertexBuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, handle.vertexBuffer);
     glEnableVertexAttribArray(ATTRIB_POS);
     glVertexAttribPointer(ATTRIB_POS, 3, GL_FLOAT, GL_FALSE, sizeof(SIndexedMesh::Vertex),
                           (void *)offsetof(SIndexedMesh::Vertex, pos));
@@ -999,8 +1014,8 @@ void IndexedMeshRenderer::Draw(const IndexedMeshRenderer::Handle &m) {
                               (void *)offsetof(SIndexedMesh::Vertex, tex));
     }
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.indexBuffer);
-    glDrawElements(GL_TRIANGLES, m.size, GL_UNSIGNED_INT, NULL);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, handle.indexBuffer);
+    glDrawElements(GL_TRIANGLES, handle.size, GL_UNSIGNED_INT, NULL);
 
     glDisableVertexAttribArray(ATTRIB_POS);
     if(NeedsTexture()) glDisableVertexAttribArray(ATTRIB_TEX);
@@ -1023,14 +1038,14 @@ bool IndexedMeshRenderer::NeedsTexture() const {
         selectedShader == &pointShader;
 }
 
-void IndexedMeshRenderer::SetModelview(double *matrix) {
+void IndexedMeshRenderer::SetModelview(const double *matrix) {
     colShader.SetUniformMatrix("modelview", matrix);
     texShader.SetUniformMatrix("modelview", matrix);
     texaShader.SetUniformMatrix("modelview", matrix);
     pointShader.SetUniformMatrix("modelview", matrix);
 }
 
-void IndexedMeshRenderer::SetProjection(double *matrix) {
+void IndexedMeshRenderer::SetProjection(const double *matrix) {
     colShader.SetUniformMatrix("projection", matrix);
     texShader.SetUniformMatrix("projection", matrix);
     texaShader.SetUniformMatrix("projection", matrix);

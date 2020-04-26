@@ -203,7 +203,7 @@ static void FindPrefix(const std::string &raw, size_t *pos) {
         }
     }
 #else
-    if(raw.size() >= 1 && raw[0] == '/') {
+    if(!raw.empty() && raw[0] == '/') {
         *pos = 1;
     }
 #endif
@@ -295,7 +295,7 @@ Path Path::Expand(bool fromCurrentDirectory) const {
 
     if(expanded.IsEmpty()) {
         if(expandedComponents.empty()) {
-            expandedComponents.push_back(".");
+            expandedComponents.emplace_back(".");
         }
         expanded = From(Concat(expandedComponents, SEPARATOR));
     } else if(!expandedComponents.empty()) {
@@ -371,12 +371,12 @@ Path Path::RelativeTo(const Path &base) const {
 
     std::vector<std::string> resultComponents;
     for(size_t i = common; i < baseComponents.size(); i++) {
-        resultComponents.push_back("..");
+        resultComponents.emplace_back("..");
     }
     resultComponents.insert(resultComponents.end(),
                             components.begin() + common, components.end());
     if(resultComponents.empty()) {
-        resultComponents.push_back(".");
+        resultComponents.emplace_back(".");
     }
     return From(Concat(resultComponents, SEPARATOR));
 }
@@ -405,6 +405,13 @@ FILE *OpenFile(const Platform::Path &filename, const char *mode) {
 #endif
 }
 
+bool FileExists(const Platform::Path &filename) {
+    FILE *f = OpenFile(filename, "rb");
+    if(f == NULL) return false;
+    fclose(f);
+    return true;
+}
+
 void RemoveFile(const Platform::Path &filename) {
     ssassert(filename.raw.length() == strlen(filename.raw.c_str()),
              "Unexpected null byte in middle of a path");
@@ -419,11 +426,15 @@ bool ReadFile(const Platform::Path &filename, std::string *data) {
     FILE *f = OpenFile(filename, "rb");
     if(f == NULL) return false;
 
-    fseek(f, 0, SEEK_END);
+    if(fseek(f, 0, SEEK_END) != 0)
+        return false;
     data->resize(ftell(f));
-    fseek(f, 0, SEEK_SET);
-    fread(&(*data)[0], 1, data->size(), f);
-    fclose(f);
+    if(fseek(f, 0, SEEK_SET) != 0)
+        return false;
+    if(fread(&(*data)[0], 1, data->size(), f) != data->size())
+        return false;
+    if(fclose(f) != 0)
+        return false;
 
     return true;
 }
@@ -432,14 +443,16 @@ bool WriteFile(const Platform::Path &filename, const std::string &data) {
     FILE *f = OpenFile(filename, "wb");
     if(f == NULL) return false;
 
-    fwrite(&data[0], 1, data.size(), f);
-    fclose(f);
+    if(fwrite(&data[0], 1, data.size(), f) != data.size())
+        return false;
+    if(fclose(f) != 0)
+        return false;
 
     return true;
 }
 
 //-----------------------------------------------------------------------------
-// Loading resources, on Windows.
+// Loading resources, on Windows
 //-----------------------------------------------------------------------------
 
 #if defined(WIN32)
@@ -457,7 +470,7 @@ const void *LoadResource(const std::string &name, size_t *size) {
 #endif
 
 //-----------------------------------------------------------------------------
-// Loading resources, on *nix.
+// Loading resources, on *nix
 //-----------------------------------------------------------------------------
 
 #if defined(__APPLE__)
@@ -535,6 +548,12 @@ static Platform::Path FindLocalResourceDir() {
         return resourceDir;
     }
 
+    resourceDir = selfPath.Parent().Parent().Join("share").Join("solvespace");
+    if(stat(resourceDir.raw.c_str(), &st) != -1) {
+        // A resource directory exists at a relative path, good.
+        return resourceDir;
+    }
+
     // No executable-adjacent resource directory; use the one from compile-time prefix.
     return Path::From(UNIX_DATADIR);
 }
@@ -567,6 +586,10 @@ const void *LoadResource(const std::string &name, size_t *size) {
 }
 
 #endif
+
+//-----------------------------------------------------------------------------
+// Command-line argument handling
+//-----------------------------------------------------------------------------
 
 }
 }

@@ -6,17 +6,54 @@ This repository contains the source code of [SolveSpace][], a parametric
 
 [solvespace]: http://solvespace.com
 
+Community
+---------
+
+The official SolveSpace [website][sswebsite] has [tutorials][sstutorial],
+[reference manual][ssref] and a [forum][ssforum]; there is also an official
+IRC channel [#solvespace at irc.freenode.net][ssirc].
+
+[sswebsite]: http://solvespace.com/
+[ssref]: http://solvespace.com/ref.pl
+[sstutorial]: http://solvespace.com/tutorial.pl
+[ssforum]: http://solvespace.com/forum.pl
+[ssirc]: https://webchat.freenode.net/?channels=solvespace
+
 Installation
 ------------
 
-### macOS (>=10.6 64-bit), Windows (>=Vista 32-bit)
+### Via official binary packages
 
-Binary packages for macOS and Windows are available via
-[GitHub releases][rel].
+_Official_ release binary packages for macOS (>=10.6 64-bit) and Windows (>=Vista 32-bit) are
+available via [GitHub releases][rel]. These packages are automatically built by
+the SolveSpace maintainers for each stable release.
 
 [rel]: https://github.com/solvespace/solvespace/releases
 
-### Other systems
+### Via Snap Store
+
+Builds from master are automatically released to the `edge` channel in the Snap Store. Those packages contain the latest improvements, but receive less testing than release builds.
+
+Future official releases will appear in the `stable` channel.
+
+[![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/solvespace)
+
+Or install from a terminal:
+
+```
+snap install --edge solvespace
+```
+
+### Via third-party binary packages
+
+_Third-party_ nightly binary packages for Debian and Ubuntu are available
+via [notesalexp.org][notesalexp]. These packages are automatically built from non-released
+source code. The SolveSpace maintainers do not control the contents of these packages
+and cannot guarantee their functionality.
+
+[notesalexp]: https://notesalexp.org/packages/en/source/solvespace/
+
+### Via source code
 
 See below.
 
@@ -30,15 +67,23 @@ To build the GUI, you will need fontconfig, gtkmm 3.0 (version 3.16 or later), p
 OpenGL and OpenGL GLU, and optionally, the Space Navigator client library.
 On a Debian derivative (e.g. Ubuntu) these can be installed with:
 
-    apt-get install git build-essential cmake zlib1g-dev libpng-dev libcairo2-dev libfreetype6-dev
-    apt-get install libjson-c-dev libfontconfig1-dev libgtkmm-3.0-dev libpangomm-1.4-dev \
-                    libgl-dev libglu-dev libspnav-dev
+    sudo apt install git build-essential cmake zlib1g-dev libpng-dev \
+                     libcairo2-dev libfreetype6-dev libjson-c-dev \
+                     libfontconfig1-dev libgtkmm-3.0-dev libpangomm-1.4-dev \
+                     libgl-dev libglu-dev libspnav-dev
+
+On a Redhat derivative (e.g. Fedora) the dependencies can be installed with:
+
+    sudo dnf install git gcc-c++ cmake zlib-devel libpng-devel \
+                     cairo-devel freetype-devel json-c-devel \
+                     fontconfig-devel gtkmm30-devel pangomm-devel \
+                     mesa-libGL-devel mesa-libGLU-devel libspnav-devel
 
 Before building, check out the project and the necessary submodules:
 
     git clone https://github.com/solvespace/solvespace
     cd solvespace
-    git submodule update --init extlib/libdxfrw
+    git submodule update --init extlib/libdxfrw extlib/flatbuffers extlib/q3d
 
 After that, build SolveSpace as following:
 
@@ -63,7 +108,7 @@ Before building, check out the project and the necessary submodules:
 
     git clone https://github.com/solvespace/solvespace
     cd solvespace
-    git submodule update
+    git submodule update --init
 
 After that, build 32-bit SolveSpace as following:
 
@@ -86,13 +131,16 @@ is built as `build/bin/solvespace-cli.exe`.
 
 Space Navigator support will not be available.
 
+If using Ubuntu to cross-compile, Ubuntu 17.10 or newer (or, alternatively, MinGW from the Ubuntu
+17.10 repositories) is required.
+
 Building on macOS
 -----------------
 
-You will need XCode tools, CMake, libpng and Freetype. To build tests, you
-will need cairo. Assuming you use [homebrew][], these can be installed with:
+You will need git, XCode tools and CMake. Git and CMake can be installed
+via [Homebrew][]:
 
-    brew install git cmake libpng freetype cairo
+    brew install git cmake
 
 XCode has to be installed via AppStore or [the Apple website][appledeveloper];
 it requires a free Apple ID.
@@ -101,7 +149,7 @@ Before building, check out the project and the necessary submodules:
 
     git clone https://github.com/solvespace/solvespace
     cd solvespace
-    git submodule update --init extlib/libdxfrw
+    git submodule update --init
 
 After that, build SolveSpace as following:
 
@@ -116,9 +164,9 @@ Alternatively, generate an XCode project, open it, and build the "Release" schem
     cd build
     cmake .. -G Xcode
 
-The application is built in `build/bin/solvespace.app`, the graphical interface executable
-is `build/bin/solvespace.app/Contents/MacOS/solvespace`, and the command-line interface executable
-is `build/bin/solvespace.app/Contents/MacOS/solvespace-cli`.
+The application is built in `build/bin/SolveSpace.app`, the graphical interface executable
+is `build/bin/SolveSpace.app/Contents/MacOS/SolveSpace`, and the command-line interface executable
+is `build/bin/SolveSpace.app/Contents/MacOS/solvespace-cli`.
 
 [homebrew]: https://brew.sh/
 [appledeveloper]: https://developer.apple.com/download/
@@ -135,7 +183,7 @@ Before building, check out the project and the necessary submodules:
 
     git clone https://github.com/solvespace/solvespace
     cd solvespace
-    git submodule update --init extlib/libdxfrw
+    git submodule update --init extlib/libdxfrw extlib/flatbuffers extlib/q3do
 
 After that, build SolveSpace as following:
 
@@ -205,4 +253,6 @@ and debug SolveSpace.
 License
 -------
 
-SolveSpace is distributed under the terms of the [GPL3 license](COPYING.txt).
+SolveSpace is distributed under the terms of the [GPL v3 license](COPYING.txt). It is possible
+to license SolveSpace for use in a commercial application; to do so,
+[contact](http://solvespace.com/contact.pl) the developers.

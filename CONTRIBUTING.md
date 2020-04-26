@@ -14,6 +14,12 @@ Bug reports are always welcome! When reporting a bug, please include the followi
 GitHub does not allow attaching `*.slvs` files, but it does allow attaching `*.zip` files,
 so any savefiles should first be archived.
 
+Signing the CLA
+---------------
+
+To contribute code, translations, artwork, or other resources to SolveSpace, it is necessary to
+sign a [Contributor License Agreement](https://cla-assistant.io/solvespace/solvespace).
+
 Contributing translations
 -------------------------
 
@@ -180,10 +186,15 @@ std::string SolveSpace::Dirname(std::string filename) {
 }
 ```
 
+If you install [clang-format][], this style can be automatically applied by staging your changes
+with `git add -u`, running `git clang-format`, and staging any changes it made again.
+
+[clang-format]: https://clang.llvm.org/docs/ClangFormat.html
+
 Debugging code
 --------------
 
-SolveSpace releases are throughly tested but sometimes they contain crash
+SolveSpace releases are thoroughly tested but sometimes they contain crash
 bugs anyway. The reason for such crashes can be determined only if the executable
 was built with debug information.
 

@@ -148,7 +148,7 @@ public:
         }
 
         SS.GenerateAll();
-        InvalidateGraphics();
+        SS.GW.Invalidate();
         SS.ScheduleShowTW();
     }
 };
@@ -156,28 +156,31 @@ public:
 static SpacerButton   spacerButton;
 
 static ShowHideButton workplanesButton =
-    { &(SS.GW.showWorkplanes),  "workplane",     "workplanes from inactive groups" };
+    { &(SS.GW.showWorkplanes),   "workplane",     "workplanes from inactive groups" };
 static ShowHideButton normalsButton =
-    { &(SS.GW.showNormals),     "normal",        "normals"                         };
+    { &(SS.GW.showNormals),      "normal",        "normals"                         };
 static ShowHideButton pointsButton =
-    { &(SS.GW.showPoints),      "point",         "points"                          };
+    { &(SS.GW.showPoints),       "point",         "points"                          };
+static ShowHideButton constructionButton =
+    { &(SS.GW.showConstruction), "construction",  "construction entities"           };
 static ShowHideButton constraintsButton =
-    { &(SS.GW.showConstraints), "constraint",    "constraints and dimensions"      };
+    { &(SS.GW.showConstraints),  "constraint",    "constraints and dimensions"      };
 static FacesButton facesButton;
 static ShowHideButton shadedButton =
-    { &(SS.GW.showShaded),      "shaded",        "shaded view of solid model"      };
+    { &(SS.GW.showShaded),       "shaded",        "shaded view of solid model"      };
 static ShowHideButton edgesButton =
-    { &(SS.GW.showEdges),       "edges",         "edges of solid model"            };
+    { &(SS.GW.showEdges),        "edges",         "edges of solid model"            };
 static ShowHideButton outlinesButton =
-    { &(SS.GW.showOutlines),    "outlines",      "outline of solid model"          };
+    { &(SS.GW.showOutlines),     "outlines",      "outline of solid model"          };
 static ShowHideButton meshButton =
-    { &(SS.GW.showMesh),        "mesh",          "triangle mesh of solid model"    };
+    { &(SS.GW.showMesh),         "mesh",          "triangle mesh of solid model"    };
 static OccludedLinesButton occludedLinesButton;
 
 static Button *buttons[] = {
     &workplanesButton,
     &normalsButton,
     &pointsButton,
+    &constructionButton,
     &constraintsButton,
     &facesButton,
     &spacerButton,
@@ -189,25 +192,27 @@ static Button *buttons[] = {
     &occludedLinesButton,
 };
 
+/** Foreground color codes. */
 const TextWindow::Color TextWindow::fgColors[] = {
-    { 'd', RGBi(255, 255, 255) },
-    { 'l', RGBi(100, 100, 255) },
-    { 't', RGBi(255, 200,   0) },
+    { 'd', RGBi(255, 255, 255) },  // Default   : white
+    { 'l', RGBi(100, 200, 255) },  // links     : blue
+    { 't', RGBi(255, 200, 100) },  // tree/text : yellow
     { 'h', RGBi( 90,  90,  90) },
-    { 's', RGBi( 40, 255,  40) },
+    { 's', RGBi( 40, 255,  40) },  // Ok        : green
     { 'm', RGBi(200, 200,   0) },
-    { 'r', RGBi(  0,   0,   0) },
-    { 'x', RGBi(255,  20,  20) },
-    { 'i', RGBi(  0, 255, 255) },
+    { 'r', RGBi(  0,   0,   0) },  // Reverse   : black
+    { 'x', RGBi(255,  20,  20) },  // Error     : red
+    { 'i', RGBi(  0, 255, 255) },  // Info      : cyan
     { 'g', RGBi(160, 160, 160) },
     { 'b', RGBi(200, 200, 200) },
     { 0,   RGBi(  0,   0,   0) }
 };
+/** Background color codes. */
 const TextWindow::Color TextWindow::bgColors[] = {
-    { 'd', RGBi(  0,   0,   0) },
+    { 'd', RGBi(  0,   0,   0) },  // Default   : black
     { 't', RGBi( 34,  15,  15) },
-    { 'a', RGBi( 25,  25,  25) },
-    { 'r', RGBi(255, 255, 255) },
+    { 'a', RGBi( 25,  25,  25) },  // Alternate : dark gray
+    { 'r', RGBi(255, 255, 255) },  // Reverse   : white
     { 0,   RGBi(  0,   0,   0) }
 };
 
@@ -223,15 +228,49 @@ void TextWindow::MakeColorTable(const Color *in, float *out) {
 }
 
 void TextWindow::Init() {
-    canvas = CreateRenderer();
+    if(!window) {
+        window = Platform::CreateWindow(Platform::Window::Kind::TOOL, SS.GW.window);
+        if(window) {
+            canvas = CreateRenderer();
+
+            using namespace std::placeholders;
+            window->onClose = []() {
+                SS.GW.showTextWindow = false;
+                SS.GW.EnsureValidActives();
+            };
+            window->onMouseEvent = [this](Platform::MouseEvent event) {
+                using Platform::MouseEvent;
+
+                if(event.type == MouseEvent::Type::PRESS ||
+                   event.type == MouseEvent::Type::DBL_PRESS ||
+                   event.type == MouseEvent::Type::MOTION) {
+                    bool isClick  = (event.type != MouseEvent::Type::MOTION);
+                    bool leftDown = (event.button == MouseEvent::Button::LEFT);
+                    this->MouseEvent(isClick, leftDown, event.x, event.y);
+                    return true;
+                } else if(event.type == MouseEvent::Type::LEAVE) {
+                    MouseLeave();
+                    return true;
+                } else if(event.type == MouseEvent::Type::SCROLL_VERT) {
+                    window->SetScrollbarPosition(window->GetScrollbarPosition() -
+                                                 LINE_HEIGHT / 2 * event.scrollDelta);
+                }
+                return false;
+            };
+            window->onKeyboardEvent = SS.GW.window->onKeyboardEvent;
+            window->onRender = std::bind(&TextWindow::Paint, this);
+            window->onEditingDone = std::bind(&TextWindow::EditControlDone, this, _1);
+            window->onScrollbarAdjusted = std::bind(&TextWindow::ScrollbarEvent, this, _1);
+            window->SetMinContentSize(370, 370);
+        }
+    }
 
     ClearSuper();
 }
 
 void TextWindow::ClearSuper() {
-    HideEditControl();
-
     // Ugly hack, but not so ugly as the next line
+    Platform::WindowRef oldWindow = std::move(window);
     std::shared_ptr<ViewportCanvas> oldCanvas = canvas;
 
     // Cannot use *this = {} here because TextWindow instances
@@ -240,7 +279,10 @@ void TextWindow::ClearSuper() {
     memset(this, 0, sizeof(*this));
 
     // Return old canvas
+    window = std::move(oldWindow);
     canvas = oldCanvas;
+
+    HideEditControl();
 
     MakeColorTable(fgColors, fgColorTable);
     MakeColorTable(bgColors, bgColorTable);
@@ -251,7 +293,10 @@ void TextWindow::ClearSuper() {
 
 void TextWindow::HideEditControl() {
     editControl.colorPicker.show = false;
-    HideTextEditControl();
+    if(window) {
+        window->HideEditor();
+        window->Invalidate();
+    }
 }
 
 void TextWindow::ShowEditControl(int col, const std::string &str, int halfRow) {
@@ -262,11 +307,13 @@ void TextWindow::ShowEditControl(int col, const std::string &str, int halfRow) {
     int x = LEFT_MARGIN + CHAR_WIDTH_*col;
     int y = (halfRow - SS.TW.scrollPos)*(LINE_HEIGHT/2);
 
-    ShowTextEditControl(x, y + 18, str);
+    double width, height;
+    window->GetContentSize(&width, &height);
+    window->ShowEditor(x, y + LINE_HEIGHT - 2, LINE_HEIGHT - 4,
+                       width - x, /*isMonospace=*/true, str);
 }
 
-void TextWindow::ShowEditControlWithColorPicker(int col, RgbaColor rgb)
-{
+void TextWindow::ShowEditControlWithColorPicker(int col, RgbaColor rgb) {
     SS.ScheduleShowTW();
 
     editControl.colorPicker.show = true;
@@ -294,10 +341,10 @@ void TextWindow::ClearScreen() {
 void TextWindow::Printf(bool halfLine, const char *fmt, ...) {
     if(!canvas) return;
 
+    if(rows >= MAX_ROWS) return;
+
     va_list vl;
     va_start(vl, fmt);
-
-    if(rows >= MAX_ROWS) return;
 
     int r, c;
     r = rows;
@@ -445,7 +492,9 @@ void TextWindow::Printf(bool halfLine, const char *fmt, ...) {
             }
         }
 
-        fmt++;
+        utf8_iterator it(fmt);
+        it++;
+        fmt = it.ptr();
     }
     while(c < MAX_COLS) {
         meta[r][c].fg = fg;
@@ -459,7 +508,9 @@ done:
 }
 
 void TextWindow::Show() {
-    if(SS.GW.pending.operation == GraphicsWindow::Pending::NONE) SS.GW.ClearPending();
+    if(SS.GW.pending.operation == GraphicsWindow::Pending::NONE) {
+        SS.GW.ClearPending(/*scheduleShowTW=*/false);
+    }
 
     SS.GW.GroupSelection();
     auto const &gs = SS.GW.gs;
@@ -512,27 +563,38 @@ void TextWindow::Show() {
         }
     }
 
-    InvalidateText();
+    if(window) Resize();
 }
 
-void TextWindow::TimerCallback()
+void TextWindow::Resize()
 {
-    tooltippedButton = hoveredButton;
-    InvalidateText();
+    double width, height;
+    window->GetContentSize(&width, &height);
+
+    halfRows = (int)height / (LINE_HEIGHT/2);
+
+    int bottom = top[rows-1] + 2;
+    scrollPos = min(scrollPos, bottom - halfRows);
+    scrollPos = max(scrollPos, 0);
+
+    window->ConfigureScrollbar(0, top[rows - 1] + 1, halfRows);
+    window->SetScrollbarPosition(scrollPos);
+    window->SetScrollbarVisible(top[rows - 1] + 1 > halfRows);
+    window->Invalidate();
 }
 
 void TextWindow::DrawOrHitTestIcons(UiCanvas *uiCanvas, TextWindow::DrawOrHitHow how,
                                     double mx, double my)
 {
-    int width, height;
-    GetTextWindowSize(&width, &height);
+    double width, height;
+    window->GetContentSize(&width, &height);
 
     int x = 20, y = 33 + LINE_HEIGHT;
     y -= scrollPos*(LINE_HEIGHT/2);
 
     if(how == PAINT) {
         int top = y - 28, bot = y + 4;
-        uiCanvas->DrawRect(0, width, top, bot,
+        uiCanvas->DrawRect(0, (int)width, top, bot,
                            /*fillColor=*/{ 30, 30, 30, 255 }, /*outlineColor=*/{});
     }
 
@@ -541,20 +603,15 @@ void TextWindow::DrawOrHitTestIcons(UiCanvas *uiCanvas, TextWindow::DrawOrHitHow
         hoveredButton = NULL;
     }
 
+    double hoveredX, hoveredY;
     for(Button *button : buttons) {
         if(how == PAINT) {
             button->Draw(uiCanvas, x, y, (button == hoveredButton));
         } else if(mx > x - 2 && mx < x + 26 &&
                   my < y + 2 && my > y - 26) {
-            // The mouse is hovered over this icon, so do the tooltip
-            // stuff.
-            if(button != tooltippedButton) {
-                oldMousePos = Point2d::From(mx, my);
-            }
-            if(button != oldHovered || how == CLICK) {
-                SetTimerFor(1000);
-            }
             hoveredButton = button;
+            hoveredX = x - 2;
+            hoveredY = y - 26;
             if(how == CLICK) {
                 button->Click();
             }
@@ -564,34 +621,12 @@ void TextWindow::DrawOrHitTestIcons(UiCanvas *uiCanvas, TextWindow::DrawOrHitHow
     }
 
     if(how != PAINT && hoveredButton != oldHovered) {
-        InvalidateText();
-    }
-
-    if(tooltippedButton && !tooltippedButton->Tooltip().empty()) {
-        if(how == PAINT) {
-            std::string tooltip = tooltippedButton->Tooltip();
-
-            int ox = (int)oldMousePos.x, oy = (int)oldMousePos.y - LINE_HEIGHT;
-            ox += 3;
-            oy -= 3;
-            int tw = (tooltip.length() + 1) * (CHAR_WIDTH_ - 1);
-            ox = min(ox, (width - 25) - tw);
-            oy = max(oy, 5);
-
-            uiCanvas->DrawRect(ox, ox+tw, oy, oy+LINE_HEIGHT,
-                               /*fillColor=*/{ 255, 255, 150, 255 },
-                               /*outlineColor=*/{ 0, 0, 0, 255 },
-                               /*zIndex=*/1);
-            uiCanvas->DrawBitmapText(tooltip, ox+5, oy-3+LINE_HEIGHT, { 0, 0, 0, 255 },
-                                     /*zIndex=*/1);
+        if(hoveredButton == NULL) {
+            window->SetTooltip("", 0, 0, 0, 0);
         } else {
-            if(!hoveredButton || (hoveredButton != tooltippedButton)) {
-                tooltippedButton = NULL;
-                InvalidateGraphics();
-            }
-            // And if we're hovered, then we've set a timer that will cause
-            // us to show the tool tip later.
+            window->SetTooltip(hoveredButton->Tooltip(), hoveredX, hoveredY, 28, 28);
         }
+        window->Invalidate();
     }
 }
 
@@ -661,12 +696,14 @@ std::shared_ptr<Pixmap> TextWindow::HsvPattern1d(double hue, double sat, int w, 
 
 void TextWindow::ColorPickerDone() {
     RgbaColor rgb = editControl.colorPicker.rgb;
-    EditControlDone(ssprintf("%.2f, %.2f, %.3f", rgb.redF(), rgb.greenF(), rgb.blueF()).c_str());
+    EditControlDone(ssprintf("%.2f, %.2f, %.3f", rgb.redF(), rgb.greenF(), rgb.blueF()));
 }
 
 bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, bool leftDown,
                                           double x, double y)
 {
+    using Platform::Window;
+
     bool mousePointerAsHand = false;
 
     if(how == HOVER && !leftDown) {
@@ -675,7 +712,7 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
     }
 
     if(!editControl.colorPicker.show) return false;
-    if(how == CLICK || (how == HOVER && leftDown)) InvalidateText();
+    if(how == CLICK || (how == HOVER && leftDown)) window->Invalidate();
 
     static const RgbaColor BaseColor[12] = {
         RGBi(255,   0,   0),
@@ -694,8 +731,8 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
         RGBi(  0, 127, 255),
     };
 
-    int width, height;
-    GetTextWindowSize(&width, &height);
+    double width, height;
+    window->GetContentSize(&width, &height);
 
     int px = LEFT_MARGIN + CHAR_WIDTH_*editControl.col;
     int py = (editControl.halfRow - SS.TW.scrollPos)*(LINE_HEIGHT/2);
@@ -705,7 +742,7 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
     static const int WIDTH = 16, HEIGHT = 12;
     static const int PITCH = 18, SIZE = 15;
 
-    px = min(px, width - (WIDTH*PITCH + 40));
+    px = min(px, (int)width - (WIDTH*PITCH + 40));
 
     int pxm = px + WIDTH*PITCH + 11,
         pym = py + HEIGHT*PITCH + 7;
@@ -714,10 +751,12 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
     if(how == PAINT) {
         uiCanvas->DrawRect(px, pxm+bw, py, pym+bw,
                            /*fillColor=*/{ 50, 50, 50, 255 },
-                           /*outlineColor=*/{});
+                           /*outlineColor=*/{},
+                           /*zIndex=*/1);
         uiCanvas->DrawRect(px+(bw/2), pxm+(bw/2), py+(bw/2), pym+(bw/2),
                            /*fillColor=*/{ 0, 0, 0, 255 },
-                           /*outlineColor=*/{});
+                           /*outlineColor=*/{},
+                           /*zIndex=*/1);
     } else {
         if(x < px || x > pxm+(bw/2) ||
            y < py || y > pym+(bw/2))
@@ -758,7 +797,8 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
             if(how == PAINT) {
                 uiCanvas->DrawRect(sx, sx+SIZE, sy, sy+SIZE,
                                    /*fillColor=*/RGBf(rgb.x, rgb.y, rgb.z),
-                                   /*outlineColor=*/{});
+                                   /*outlineColor=*/{},
+                                   /*zIndex=*/2);
             } else if(how == CLICK) {
                 if(x >= sx && x <= sx+SIZE && y >= sy && y <= sy+SIZE) {
                     editControl.colorPicker.rgb = RGBf(rgb.x, rgb.y, rgb.z);
@@ -779,7 +819,8 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
     if(how == PAINT) {
         uiCanvas->DrawRect(hx, hxm, hy, hym,
                            /*fillColor=*/editControl.colorPicker.rgb,
-                           /*outlineColor=*/{});
+                           /*outlineColor=*/{},
+                           /*zIndex=*/2);
     } else if(how == CLICK) {
         if(x >= hx && x <= hxm && y >= hy && y <= hym) {
             ColorPickerDone();
@@ -799,10 +840,13 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
         uiCanvas->DrawPixmap(HsvPattern1d(editControl.colorPicker.h,
                                           editControl.colorPicker.s,
                                           hxm-hx, hym-hy),
-                             hx, hy);
+                             hx, hy, /*zIndex=*/2);
 
         int cx = hx+(int)((hxm-hx)*(1.0 - editControl.colorPicker.v));
-        uiCanvas->DrawLine(cx, hy, cx, hym, { 0, 0, 0, 255 });
+        uiCanvas->DrawLine(cx, hy, cx, hym,
+                           /*fillColor=*/{ 0, 0, 0, 255 },
+                           /*outlineColor=*/{},
+                           /*zIndex=*/3);
     } else if(how == CLICK ||
           (how == HOVER && leftDown && editControl.colorPicker.picker1dActive))
     {
@@ -825,12 +869,19 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
     hym = hy + PITCH*6 + SIZE;
     // Two-dimensional thing to pick a color by hue and saturation
     if(how == PAINT) {
-        uiCanvas->DrawPixmap(HsvPattern2d(hxm-hx, hym-hy), hx, hy);
+        uiCanvas->DrawPixmap(HsvPattern2d(hxm-hx, hym-hy), hx, hy,
+                             /*zIndex=*/2);
 
         int cx = hx+(int)((hxm-hx)*editControl.colorPicker.h),
             cy = hy+(int)((hym-hy)*editControl.colorPicker.s);
-        uiCanvas->DrawLine(cx - 5, cy, cx + 4, cy, { 255, 255, 255, 255 });
-        uiCanvas->DrawLine(cx, cy - 5, cx, cy + 4, { 255, 255, 255, 255 });
+        uiCanvas->DrawLine(cx - 5, cy, cx + 5, cy,
+                           /*fillColor=*/{ 255, 255, 255, 255 },
+                           /*outlineColor=*/{},
+                           /*zIndex=*/3);
+        uiCanvas->DrawLine(cx, cy - 5, cx, cy + 5,
+                           /*fillColor=*/{ 255, 255, 255, 255 },
+                           /*outlineColor=*/{},
+                           /*zIndex=*/3);
     } else if(how == CLICK ||
           (how == HOVER && leftDown && editControl.colorPicker.picker2dActive))
     {
@@ -850,44 +901,40 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
         }
     }
 
-    SetMousePointerToHand(mousePointerAsHand);
+    window->SetCursor(mousePointerAsHand ?
+                      Window::Cursor::HAND :
+                      Window::Cursor::POINTER);
     return true;
 }
 
 void TextWindow::Paint() {
     if (!canvas) return;
 
-    int width, height;
-    GetTextWindowSize(&width, &height);
+    double width, height;
+    window->GetContentSize(&width, &height);
+    if(halfRows != (int)height / (LINE_HEIGHT/2))
+        Resize();
 
     Camera camera = {};
-    camera.width  = width;
-    camera.height = height;
+    camera.width      = width;
+    camera.height     = height;
+    camera.pixelRatio = window->GetDevicePixelRatio();
+    camera.gridFit    = (window->GetDevicePixelRatio() == 1);
     camera.LoadIdentity();
-    camera.offset.x = -(double)camera.width  / 2.0;
-    camera.offset.y = -(double)camera.height / 2.0;
+    camera.offset.x   = -camera.width  / 2.0;
+    camera.offset.y   = -camera.height / 2.0;
 
     Lighting lighting = {};
     lighting.backgroundColor = RGBi(0, 0, 0);
 
     canvas->SetLighting(lighting);
     canvas->SetCamera(camera);
-    canvas->NewFrame();
+    canvas->StartFrame();
 
     UiCanvas uiCanvas = {};
     uiCanvas.canvas = canvas;
     uiCanvas.flip = true;
 
-    halfRows = camera.height / (LINE_HEIGHT/2);
-
-    int bottom = top[rows-1] + 2;
-    scrollPos = min(scrollPos, bottom - halfRows);
-    scrollPos = max(scrollPos, 0);
-
-    // Let's set up the scroll bar first
-    MoveTextScrollbarTo(scrollPos, top[rows - 1] + 1, halfRows);
-
-    // Now paint the window.
     int r, c, a;
     for(a = 0; a < 2; a++) {
         for(r = 0; r < rows; r++) {
@@ -895,7 +942,7 @@ void TextWindow::Paint() {
             if(ltop < (scrollPos-1)) continue;
             if(ltop > scrollPos+halfRows) break;
 
-            for(c = 0; c < min((width/CHAR_WIDTH_)+1, (int) MAX_COLS); c++) {
+            for(c = 0; c < min(((int)width/CHAR_WIDTH_)+1, (int) MAX_COLS); c++) {
                 int x = LEFT_MARGIN + c*CHAR_WIDTH_;
                 int y = (ltop-scrollPos)*(LINE_HEIGHT/2) + 4;
 
@@ -999,21 +1046,23 @@ void TextWindow::Paint() {
     DrawOrHitTestColorPicker(&uiCanvas, PAINT, false, 0, 0);
 
     canvas->FlushFrame();
+    canvas->FinishFrame();
     canvas->Clear();
 }
 
 void TextWindow::MouseEvent(bool leftClick, bool leftDown, double x, double y) {
-    if(TextEditControlIsVisible() || GraphicsEditControlIsVisible()) {
-        if(DrawOrHitTestColorPicker(NULL, leftClick ? CLICK : HOVER, leftDown, x, y))
-        {
+    using Platform::Window;
+
+    if(SS.TW.window->IsEditorVisible() || SS.GW.window->IsEditorVisible()) {
+        if(DrawOrHitTestColorPicker(NULL, leftClick ? CLICK : HOVER, leftDown, x, y)) {
             return;
         }
 
         if(leftClick) {
             HideEditControl();
-            HideGraphicsEditControl();
+            SS.GW.window->HideEditor();
         } else {
-            SetMousePointerToHand(false);
+            window->SetCursor(Window::Cursor::POINTER);
         }
         return;
     }
@@ -1039,7 +1088,7 @@ void TextWindow::MouseEvent(bool leftClick, bool leftDown, double x, double y) {
         }
     }
     if(r >= 0 && c >= 0 && r < rows && c < MAX_COLS) {
-        SetMousePointerToHand(false);
+        window->SetCursor(Window::Cursor::POINTER);
 
         hoveredRow = r;
         hoveredCol = c;
@@ -1049,16 +1098,16 @@ void TextWindow::MouseEvent(bool leftClick, bool leftDown, double x, double y) {
             if(item.link && item.f) {
                 (item.f)(item.link, item.data);
                 Show();
-                InvalidateGraphics();
+                SS.GW.Invalidate();
             }
         } else {
             if(item.link) {
-                SetMousePointerToHand(true);
+                window->SetCursor(Window::Cursor::HAND);
                 if(item.h) {
                     (item.h)(item.link, item.data);
                 }
             } else {
-                SetMousePointerToHand(false);
+                window->SetCursor(Window::Cursor::POINTER);
             }
         }
     }
@@ -1067,31 +1116,31 @@ void TextWindow::MouseEvent(bool leftClick, bool leftDown, double x, double y) {
         prevHoveredRow != hoveredRow ||
         prevHoveredCol != hoveredCol)
     {
-        InvalidateGraphics();
-        InvalidateText();
+        SS.GW.Invalidate();
+        window->Invalidate();
     }
 }
 
 void TextWindow::MouseLeave() {
-    tooltippedButton = NULL;
     hoveredButton = NULL;
     hoveredRow = 0;
     hoveredCol = 0;
-    InvalidateText();
+    window->Invalidate();
 }
 
-void TextWindow::ScrollbarEvent(int newPos) {
-    if(TextEditControlIsVisible())
+void TextWindow::ScrollbarEvent(double newPos) {
+    if(window->IsEditorVisible()) {
+        window->SetScrollbarPosition(scrollPos);
         return;
+    }
 
     int bottom = top[rows-1] + 2;
-    newPos = min(newPos, bottom - halfRows);
-    newPos = max(newPos, 0);
+    newPos = min((int)newPos, bottom - halfRows);
+    newPos = max((int)newPos, 0);
 
     if(newPos != scrollPos) {
-        scrollPos = newPos;
-        MoveTextScrollbarTo(scrollPos, top[rows - 1] + 1, halfRows);
-        InvalidateText();
+        scrollPos = (int)newPos;
+        window->Invalidate();
     }
 }
 

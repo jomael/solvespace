@@ -25,10 +25,11 @@ SolvespaceCamera.prototype.updateProjectionMatrix = function() {
     var n = new THREE.Vector3().crossVectors(this.up, this.right);
     var rotate = new THREE.Matrix4().makeBasis(this.right, this.up, n);
     rotate.transpose();
-    /* FIXME: At some point we ended up using row-major.
-       THREE.js wants column major. Scale/depth correct unaffected b/c diagonal
-       matrices remain the same when transposed. makeTranslation also makes
-       a column-major matrix. */
+    /* Transpose of rotation matrix == inverse. Rotating the camera by a
+       basis is equivalent to rotating an object by the inverse of the
+       basis. To mimic Solvespace's behavior, we pan relative to the camera.
+       So we need to be rotated to where the camera is pointing before panning.
+       See: https://en.wikipedia.org/wiki/Change_of_basis#Two_dimensions */
 
     /* TODO: If we want perspective, we need an additional matrix
        here which will modify w for perspective divide. */
@@ -58,14 +59,14 @@ SolvespaceCamera.prototype.rotate = function(right, up) {
     this.up.applyAxisAngle(oldRight, up);
     this.right.applyAxisAngle(oldUp, right);
     this.NormalizeProjectionVectors();
-}
+};
 
 SolvespaceCamera.prototype.offsetProj = function(right, up) {
     var shift = new THREE.Vector3(right * this.right.x + up * this.up.x,
         right * this.right.y + up * this.up.y,
         right * this.right.z + up * this.up.z);
     this.offset.add(shift);
-}
+};
 
 /* Calculate the offset in terms of up and right projection vectors
 that will preserve the world coordinates of the current mouse position after
@@ -86,7 +87,7 @@ SolvespaceCamera.prototype.zoomTo = function(x, y, delta) {
         zoomFactor = (-delta * 0.002 + 1);
     }
     else if(delta > 0) {
-        zoomFactor = (delta * (-1.0/600.0) + 1)
+        zoomFactor = (delta * (-1.0/600.0) + 1);
     }
     else {
         return;
@@ -98,8 +99,7 @@ SolvespaceCamera.prototype.zoomTo = function(x, y, delta) {
 
     this.offset.addScaledVector(this.right, centerRightF - centerRightI);
     this.offset.addScaledVector(this.up, centerUpF - centerUpI);
-}
-
+};
 
 SolvespaceControls = function(object, domElement) {
     var _this = this;
@@ -131,8 +131,6 @@ SolvespaceControls = function(object, domElement) {
     };
 
     var _changed = false;
-    var _mouseMoved = false;
-    //var _touchPoints = new Array();
     var _offsetPrev = new THREE.Vector2(0, 0);
     var _offsetCur = new THREE.Vector2(0, 0);
     var _rotatePrev = new THREE.Vector2(0, 0);
@@ -155,17 +153,17 @@ SolvespaceControls = function(object, domElement) {
 
         switch (event.button) {
             case 0:
-                _rotateCur.set(event.screenX / window.devicePixelRatio,
-                               event.screenY / window.devicePixelRatio);
+                _rotateCur.set(event.screenX,
+                               event.screenY);
                 _rotatePrev.copy(_rotateCur);
-                document.addEventListener('mousemove', mousemove, false);
+                document.addEventListener('mousemove', mousemove_rotate, false);
                 document.addEventListener('mouseup', mouseup, false);
                 break;
             case 2:
                 _offsetCur.set(event.screenX / window.devicePixelRatio,
                                event.screenY / window.devicePixelRatio);
                 _offsetPrev.copy(_offsetCur);
-                document.addEventListener('mousemove', mousemove, false);
+                document.addEventListener('mousemove', mousemove_pan, false);
                 document.addEventListener('mouseup', mouseup, false);
                 break;
             default:
@@ -183,31 +181,26 @@ SolvespaceControls = function(object, domElement) {
         _changed = true;
     }
 
-    function mousemove(event) {
-        switch (event.button) {
-            case 0:
-                _rotateCur.set(event.screenX / window.devicePixelRatio,
-                               event.screenY / window.devicePixelRatio);
-                var diff = new THREE.Vector2().subVectors(_rotateCur, _rotatePrev)
-                    .multiplyScalar(1 / object.zoomScale);
-                object.rotate(-0.3 * Math.PI / 180 * diff.x * object.zoomScale,
-                     -0.3 * Math.PI / 180 * diff.y * object.zoomScale);
-                _changed = true;
-                _rotatePrev.copy(_rotateCur);
-                break;
-            case 2:
-                _mouseMoved = true;
-                _offsetCur.set(event.screenX / window.devicePixelRatio,
-                               event.screenY / window.devicePixelRatio);
-                var diff = new THREE.Vector2().subVectors(_offsetCur, _offsetPrev)
-                    .multiplyScalar(1 / object.zoomScale);
-                object.offsetProj(diff.x, -diff.y);
-                _changed = true;
-                _offsetPrev.copy(_offsetCur)
-                break;
-        }
+    function mousemove_rotate(event) {
+        _rotateCur.set(event.screenX,
+                       event.screenY);
+        var diff = new THREE.Vector2().subVectors(_rotateCur, _rotatePrev)
+            .multiplyScalar(1 / object.zoomScale);
+        object.rotate(-0.3 * Math.PI / 180 * diff.x * object.zoomScale,
+             -0.3 * Math.PI / 180 * diff.y * object.zoomScale);
+        _changed = true;
+        _rotatePrev.copy(_rotateCur);
     }
 
+    function mousemove_pan(event) {
+        _offsetCur.set(event.screenX / window.devicePixelRatio,
+                       event.screenY / window.devicePixelRatio);
+        var diff = new THREE.Vector2().subVectors(_offsetCur, _offsetPrev)
+            .multiplyScalar(window.devicePixelRatio / object.zoomScale);
+        object.offsetProj(diff.x, -diff.y);
+        _changed = true;
+        _offsetPrev.copy(_offsetCur);
+    }
 
     function mouseup(event) {
         /* TODO: Opera mouse gestures will intercept this event, making it
@@ -217,8 +210,16 @@ SolvespaceControls = function(object, domElement) {
         event.preventDefault();
         event.stopPropagation();
 
-        document.removeEventListener('mousemove', mousemove);
-        document.removeEventListener('mouseup', mouseup);
+        switch (event.button) {
+            case 0:
+                document.removeEventListener('mousemove', mousemove_rotate);
+                document.removeEventListener('mouseup', mouseup);
+                break;
+            case 2:
+                document.removeEventListener('mousemove', mousemove_pan);
+                document.removeEventListener('mouseup', mouseup);
+                break;
+        }
 
         _this.dispatchEvent(endEvent);
     }
@@ -226,9 +227,9 @@ SolvespaceControls = function(object, domElement) {
     function pan(event) {
         /* neWcur - prev does not necessarily equal (cur + diff) - prev.
         Floating point is not associative. */
-        touchDiff = new THREE.Vector2(event.deltaX, event.deltaY);
+        var touchDiff = new THREE.Vector2(event.deltaX, event.deltaY);
         _rotateCur.addVectors(_rotateOrig, touchDiff);
-        incDiff = new THREE.Vector2().subVectors(_rotateCur, _rotatePrev)
+        var incDiff = new THREE.Vector2().subVectors(_rotateCur, _rotatePrev)
             .multiplyScalar(1 / object.zoomScale);
         object.rotate(-0.3 * Math.PI / 180 * incDiff.x * object.zoomScale,
              -0.3 * Math.PI / 180 * incDiff.y * object.zoomScale);
@@ -271,9 +272,9 @@ SolvespaceControls = function(object, domElement) {
     }
 
     function panaftertap(event) {
-        touchDiff = new THREE.Vector2(event.deltaX, event.deltaY);
+        var touchDiff = new THREE.Vector2(event.deltaX, event.deltaY);
         _offsetCur.addVectors(_offsetOrig, touchDiff);
-        incDiff = new THREE.Vector2().subVectors(_offsetCur, _offsetPrev)
+        var incDiff = new THREE.Vector2().subVectors(_offsetCur, _offsetPrev)
             .multiplyScalar(1 / object.zoomScale);
         object.offsetProj(incDiff.x, -incDiff.y);
         _changed = true;
@@ -298,7 +299,7 @@ SolvespaceControls = function(object, domElement) {
             _this.dispatchEvent(changeEvent);
             _changed = false;
         }
-    }
+    };
 
     this.domElement.addEventListener('mousedown', mousedown, false);
     this.domElement.addEventListener('wheel', wheel, false);
@@ -318,7 +319,7 @@ SolvespaceControls = function(object, domElement) {
     this.touchControls.on('panaftertapstart', panaftertapstart);
     this.touchControls.on('panaftertap', panaftertap);
     this.touchControls.on('panaftertapend', panaftertapend);
-}
+};
 
 SolvespaceControls.prototype = Object.create(THREE.EventDispatcher.prototype);
 SolvespaceControls.prototype.constructor = SolvespaceControls;
@@ -329,15 +330,18 @@ solvespace = function(obj, params) {
     var geometry, controls, material, mesh, edges;
     var width, height, scale, offset, projRight, projUp;
     var directionalLightArray = [];
+    var inheritedWidth = false, inheritedHeight = false;
 
     if (typeof params === "undefined" || !("width" in params)) {
         width = window.innerWidth;
+        inheritedWidth = true;
     } else {
         width = params.width;
     }
 
     if (typeof params === "undefined" || !("height" in params)) {
         height = window.innerHeight;
+        inheritedHeight = true;
     } else {
         height = params.height;
     }
@@ -366,11 +370,10 @@ solvespace = function(obj, params) {
         projRight = params.projRight;
     }
 
-    domElement = init();
+    var domElement = init();
     lightUpdate();
     render();
     return domElement;
-
 
     function init() {
         scene = new THREE.Scene();
@@ -409,8 +412,35 @@ solvespace = function(obj, params) {
         controls.addEventListener("change", render);
         controls.addEventListener("change", lightUpdate);
 
+        if(inheritedWidth || inheritedHeight) {
+            window.addEventListener("resize", resize);
+        }
+
         animate();
         return renderer.domElement;
+    }
+
+    function resize() {
+        scale = camera.zoomScale;
+        if(inheritedWidth) {
+            scale *= window.innerWidth / width;
+            width = window.innerWidth;
+        }
+        if(inheritedHeight) {
+            scale *= window.innerHeight / height;
+            height = window.innerHeight;
+        }
+
+        camera.renderWidth = width;
+        camera.renderHeight = height;
+        camera.zoomScale = scale;
+
+        renderer.setSize(width * window.devicePixelRatio, height * window.devicePixelRatio);
+        renderer.domElement.style =
+            "width:  " + width  + "px;" +
+            "height: " + height + "px;";
+
+        render();
     }
 
     function animate() {
@@ -436,7 +466,7 @@ solvespace = function(obj, params) {
         // The original light positions were in camera space.
         // Project them into standard space using camera's basis
         // vectors (up, target, and their cross product).
-        n = new THREE.Vector3().crossVectors(camera.up, camera.right);
+        var n = new THREE.Vector3().crossVectors(camera.up, camera.right);
         changeBasis.makeBasis(camera.right, camera.up, n);
 
         for (var i = 0; i < 2; i++) {
@@ -503,3 +533,4 @@ solvespace = function(obj, params) {
         return new THREE.LineSegments(geometry, material);
     }
 };
+

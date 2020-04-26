@@ -20,8 +20,8 @@ void SolveSpaceUI::ClearExisting() {
     UndoClearStack(&redo);
     UndoClearStack(&undo);
 
-    for(int i = 0; i < SK.groupOrder.n; i++) {
-        Group *g = SK.GetGroup(SK.groupOrder.elem[i]);
+    for(hGroup hg : SK.groupOrder) {
+        Group *g = SK.GetGroup(hg);
         g->Clear();
     }
 
@@ -210,9 +210,9 @@ const SolveSpaceUI::SaveTable SolveSpaceUI::SAVED[] = {
 };
 
 struct SAVEDptr {
-    IdList<EntityMap,EntityId> &M() { return *((IdList<EntityMap,EntityId> *)this); }
-    std::string                &S() { return *((std::string *)this); }
-    Platform::Path             &P() { return *((Platform::Path *)this); }
+    EntityMap      &M() { return *((EntityMap *)this); }
+    std::string    &S() { return *((std::string *)this); }
+    Platform::Path &P() { return *((Platform::Path *)this); }
     bool      &b() { return *((bool *)this); }
     RgbaColor &c() { return *((RgbaColor *)this); }
     int       &d() { return *((int *)this); }
@@ -254,12 +254,16 @@ void SolveSpaceUI::SaveUsingTable(const Platform::Path &filename, int type) {
             }
 
             case 'M': {
-                int j;
                 fprintf(fh, "{\n");
-                for(j = 0; j < p->M().n; j++) {
-                    EntityMap *em = &(p->M().elem[j]);
+                // Sort the mapping, since EntityMap is not deterministic.
+                std::vector<std::pair<EntityKey, EntityId>> sorted(p->M().begin(), p->M().end());
+                std::sort(sorted.begin(), sorted.end(),
+                    [](std::pair<EntityKey, EntityId> &a, std::pair<EntityKey, EntityId> &b) {
+                        return a.second.v < b.second.v;
+                    });
+                for(auto it : sorted) {
                     fprintf(fh, "    %d %08x %d\n",
-                            em->h.v, em->input.v, em->copyNumber);
+                            it.second.v, it.first.input.v, it.first.copyNumber);
                 }
                 fprintf(fh, "}");
                 break;
@@ -297,39 +301,39 @@ bool SolveSpaceUI::SaveToFile(const Platform::Path &filename) {
     fprintf(fh, "%s\n\n\n", VERSION_STRING);
 
     int i, j;
-    for(i = 0; i < SK.group.n; i++) {
-        sv.g = SK.group.elem[i];
+    for(auto &g : SK.group) {
+        sv.g = g;
         SaveUsingTable(filename, 'g');
         fprintf(fh, "AddGroup\n\n");
     }
 
-    for(i = 0; i < SK.param.n; i++) {
-        sv.p = SK.param.elem[i];
+    for(auto &p : SK.param) {
+        sv.p = p;
         SaveUsingTable(filename, 'p');
         fprintf(fh, "AddParam\n\n");
     }
 
-    for(i = 0; i < SK.request.n; i++) {
-        sv.r = SK.request.elem[i];
+    for(auto &r : SK.request) {
+        sv.r = r;
         SaveUsingTable(filename, 'r');
         fprintf(fh, "AddRequest\n\n");
     }
 
-    for(i = 0; i < SK.entity.n; i++) {
-        (SK.entity.elem[i]).CalculateNumerical(/*forExport=*/true);
-        sv.e = SK.entity.elem[i];
+    for(auto &e : SK.entity) {
+        e.CalculateNumerical(/*forExport=*/true);
+        sv.e = e;
         SaveUsingTable(filename, 'e');
         fprintf(fh, "AddEntity\n\n");
     }
 
-    for(i = 0; i < SK.constraint.n; i++) {
-        sv.c = SK.constraint.elem[i];
+    for(auto &c : SK.constraint) {
+        sv.c = c;
         SaveUsingTable(filename, 'c');
         fprintf(fh, "AddConstraint\n\n");
     }
 
-    for(i = 0; i < SK.style.n; i++) {
-        sv.s = SK.style.elem[i];
+    for(auto &s : SK.style) {
+        sv.s = s;
         if(sv.s.h.v >= Style::FIRST_CUSTOM) {
             SaveUsingTable(filename, 's');
             fprintf(fh, "AddStyle\n\n");
@@ -339,10 +343,10 @@ bool SolveSpaceUI::SaveToFile(const Platform::Path &filename) {
     // A group will have either a mesh or a shell, but not both; but the code
     // to print either of those just does nothing if the mesh/shell is empty.
 
-    Group *g = SK.GetGroup(SK.groupOrder.elem[SK.groupOrder.n - 1]);
+    Group *g = SK.GetGroup(*SK.groupOrder.Last());
     SMesh *m = &g->runningMesh;
     for(i = 0; i < m->l.n; i++) {
-        STriangle *tr = &(m->l.elem[i]);
+        STriangle *tr = &(m->l[i]);
         fprintf(fh, "Triangle %08x %08x "
                 "%.20f %.20f %.20f  %.20f %.20f %.20f  %.20f %.20f %.20f\n",
             tr->meta.face, tr->meta.color.ToPackedInt(),
@@ -424,20 +428,26 @@ void SolveSpaceUI::LoadUsingTable(const Platform::Path &filename, char *key, cha
                     break;
 
                 case 'M': {
-                    // Don't clear this list! When the group gets added, it
-                    // makes a shallow copy, so that would result in us
-                    // freeing memory that we want to keep around. Just
-                    // zero it out so that new memory is allocated.
-                    p->M() = {};
+                    p->M().clear();
                     for(;;) {
-                        EntityMap em;
+                        EntityKey ek;
+                        EntityId ei;
                         char line2[1024];
                         if (fgets(line2, (int)sizeof(line2), fh) == NULL)
                             break;
-                        if(sscanf(line2, "%d %x %d", &(em.h.v), &(em.input.v),
-                                                     &(em.copyNumber)) == 3)
-                        {
-                            p->M().Add(&em);
+                        if(sscanf(line2, "%d %x %d", &(ei.v), &(ek.input.v),
+                                                     &(ek.copyNumber)) == 3) {
+                            if(ei.v == Entity::NO_ENTITY.v) {
+                                // Commit bd84bc1a mistakenly introduced code that would remap
+                                // some entities to NO_ENTITY. This was fixed in commit bd84bc1a,
+                                // but files created meanwhile are corrupt, and can cause crashes.
+                                //
+                                // To fix this, we skip any such remaps when loading; they will be
+                                // recreated on the next regeneration. Any resulting orphans will
+                                // be pruned in the usual way, recovering to a well-defined state.
+                                continue;
+                            }
+                            p->M().insert({ ek, ei });
                         } else {
                             break;
                         }
@@ -539,7 +549,7 @@ bool SolveSpaceUI::LoadFromFile(const Platform::Path &filename, bool canCancel) 
         Error(_("Unrecognized data in file. This file may be corrupt, or "
                 "from a newer version of the program."));
         // At least leave the program in a non-crashing state.
-        if(SK.group.n == 0) {
+        if(SK.group.IsEmpty()) {
             NewFile();
         }
     }
@@ -719,9 +729,8 @@ bool SolveSpaceUI::LoadEntitiesFromFile(const Platform::Path &filename, EntityLi
             char *key = line, *val = e+1;
             LoadUsingTable(filename, key, val);
         } else if(strcmp(line, "AddGroup")==0) {
-            // Don't leak memory; these get allocated whether we want them
-            // or not.
-            sv.g.remap.Clear();
+            // These get allocated whether we want them or not.
+            sv.g.remap.clear();
         } else if(strcmp(line, "AddParam")==0) {
 
         } else if(strcmp(line, "AddEntity")==0) {
@@ -732,7 +741,13 @@ bool SolveSpaceUI::LoadEntitiesFromFile(const Platform::Path &filename, EntityLi
         } else if(strcmp(line, "AddConstraint")==0) {
 
         } else if(strcmp(line, "AddStyle")==0) {
-
+            // Linked file contains a style that we don't have yet,
+            // so import it.
+            if (SK.style.FindByIdNoOops(sv.s.h) == nullptr) {
+                SK.style.Add(&(sv.s));
+            }
+            sv.s = {};
+            Style::FillDefaultStyle(&sv.s);
         } else if(strcmp(line, VERSION_STRING)==0) {
 
         } else if(StrStartsWith(line, "Triangle ")) {
@@ -825,7 +840,32 @@ bool SolveSpaceUI::LoadEntitiesFromFile(const Platform::Path &filename, EntityLi
     return true;
 }
 
+static Platform::MessageDialog::Response LocateImportedFile(const Platform::Path &filename,
+                                                            bool canCancel) {
+    Platform::MessageDialogRef dialog = CreateMessageDialog(SS.GW.window);
+
+    using Platform::MessageDialog;
+    dialog->SetType(MessageDialog::Type::QUESTION);
+    dialog->SetTitle(C_("title", "Missing File"));
+    dialog->SetMessage(ssprintf(C_("dialog", "The linked file “%s” is not present."),
+                                filename.raw.c_str()));
+    dialog->SetDescription(C_("dialog", "Do you want to locate it manually?\n\n"
+                                        "If you decline, any geometry that depends on "
+                                        "the missing file will be permanently removed."));
+    dialog->AddButton(C_("button", "&Yes"), MessageDialog::Response::YES,
+                      /*isDefault=*/true);
+    dialog->AddButton(C_("button", "&No"), MessageDialog::Response::NO);
+    if(canCancel) {
+        dialog->AddButton(C_("button", "&Cancel"), MessageDialog::Response::CANCEL);
+    }
+
+    // FIXME(async): asyncify this call
+    return dialog->RunModal();
+}
+
 bool SolveSpaceUI::ReloadAllLinked(const Platform::Path &saveFile, bool canCancel) {
+    Platform::SettingsRef settings = Platform::GetSettings();
+
     std::map<Platform::Path, Platform::Path, Platform::PathLess> linkMap;
 
     allConsistent = false;
@@ -853,26 +893,32 @@ try_again:
             }
         } else if(linkMap.count(g.linkFile) == 0) {
             // The file was moved; prompt the user for its new location.
-            switch(LocateImportedFileYesNoCancel(g.linkFile.RelativeTo(saveFile), canCancel)) {
-            case DIALOG_YES: {
-                Platform::Path newLinkFile;
-                if(GetOpenFile(&newLinkFile, "", SlvsFileFilter)) {
-                    linkMap[g.linkFile] = newLinkFile;
-                    g.linkFile = newLinkFile;
-                    goto try_again;
-                } else {
-                    if(canCancel) return false;
-                    break;
+            switch(LocateImportedFile(g.linkFile.RelativeTo(saveFile), canCancel)) {
+                case Platform::MessageDialog::Response::YES: {
+                    Platform::FileDialogRef dialog = Platform::CreateOpenFileDialog(SS.GW.window);
+                    dialog->AddFilters(Platform::SolveSpaceModelFileFilters);
+                    dialog->ThawChoices(settings, "LinkSketch");
+                    if(dialog->RunModal()) {
+                        dialog->FreezeChoices(settings, "LinkSketch");
+                        linkMap[g.linkFile] = dialog->GetFilename();
+                        g.linkFile = dialog->GetFilename();
+                        goto try_again;
+                    } else {
+                        if(canCancel) return false;
+                        break;
+                    }
                 }
-            }
 
-            case DIALOG_NO:
-                linkMap[g.linkFile].Clear();
-                // Geometry will be pruned by GenerateAll().
-                break;
+                case Platform::MessageDialog::Response::NO:
+                    linkMap[g.linkFile].Clear();
+                    // Geometry will be pruned by GenerateAll().
+                    break;
 
-            case DIALOG_CANCEL:
-                return false;
+                case Platform::MessageDialog::Response::CANCEL:
+                    return false;
+
+                default:
+                    ssassert(false, "Unexpected dialog response");
             }
         } else {
             // User was already asked to and refused to locate a missing linked file.
@@ -892,6 +938,8 @@ try_again:
 
 bool SolveSpaceUI::ReloadLinkedImage(const Platform::Path &saveFile,
                                      Platform::Path *filename, bool canCancel) {
+    Platform::SettingsRef settings = Platform::GetSettings();
+
     std::shared_ptr<Pixmap> pixmap;
     bool promptOpenFile = false;
     if(filename->IsEmpty()) {
@@ -904,23 +952,31 @@ bool SolveSpaceUI::ReloadLinkedImage(const Platform::Path &saveFile,
         pixmap = Pixmap::ReadPng(*filename);
         if(pixmap == NULL) {
             // The file was moved; prompt the user for its new location.
-            switch(LocateImportedFileYesNoCancel(filename->RelativeTo(saveFile), canCancel)) {
-                case DIALOG_YES:
+            switch(LocateImportedFile(filename->RelativeTo(saveFile), canCancel)) {
+                case Platform::MessageDialog::Response::YES:
                     promptOpenFile = true;
                     break;
 
-                case DIALOG_NO:
+                case Platform::MessageDialog::Response::NO:
                     // We don't know where the file is, record it as absent.
                     break;
 
-                case DIALOG_CANCEL:
+                case Platform::MessageDialog::Response::CANCEL:
                     return false;
+
+                default:
+                    ssassert(false, "Unexpected dialog response");
             }
         }
     }
 
     if(promptOpenFile) {
-        if(GetOpenFile(filename, "", RasterFileFilter)) {
+        Platform::FileDialogRef dialog = Platform::CreateOpenFileDialog(SS.GW.window);
+        dialog->AddFilters(Platform::RasterFileFilters);
+        dialog->ThawChoices(settings, "LinkImage");
+        if(dialog->RunModal()) {
+            dialog->FreezeChoices(settings, "LinkImage");
+            *filename = dialog->GetFilename();
             pixmap = Pixmap::ReadPng(*filename);
             if(pixmap == NULL) {
                 Error("The image '%s' is corrupted.", filename->raw.c_str());

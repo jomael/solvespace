@@ -60,8 +60,18 @@ void TextWindow::ScreenChangeGridSpacing(int link, uint32_t v) {
 }
 
 void TextWindow::ScreenChangeDigitsAfterDecimal(int link, uint32_t v) {
-    SS.TW.ShowEditControl(3, ssprintf("%d", SS.UnitDigitsAfterDecimal()));
+    SS.TW.ShowEditControl(14, ssprintf("%d", SS.UnitDigitsAfterDecimal()));
     SS.TW.edit.meaning = Edit::DIGITS_AFTER_DECIMAL;
+}
+
+void TextWindow::ScreenChangeDigitsAfterDecimalDegree(int link, uint32_t v) {
+    SS.TW.ShowEditControl(14, ssprintf("%d", SS.afterDecimalDegree));
+    SS.TW.edit.meaning = Edit::DIGITS_AFTER_DECIMAL_DEGREE;
+}
+
+void TextWindow::ScreenChangeUseSIPrefixes(int link, uint32_t v) {
+    SS.useSIPrefixes = !SS.useSIPrefixes;
+    SS.GW.Invalidate();
 }
 
 void TextWindow::ScreenChangeExportScale(int link, uint32_t v) {
@@ -80,28 +90,46 @@ void TextWindow::ScreenChangeFixExportColors(int link, uint32_t v) {
 
 void TextWindow::ScreenChangeBackFaces(int link, uint32_t v) {
     SS.drawBackFaces = !SS.drawBackFaces;
-    SS.GW.persistentDirty = true;
-    InvalidateGraphics();
+    SS.GW.Invalidate(/*clearPersistent=*/true);
+}
+
+void TextWindow::ScreenChangeTurntableNav(int link, uint32_t v) {
+    SS.turntableNav = !SS.turntableNav;
+    if(SS.turntableNav) {
+        // If turntable nav is being turned on, align view so Z is vertical
+        SS.GW.AnimateOnto(Quaternion::From(Vector::From(-1, 0, 0), Vector::From(0, 0, 1)),
+                          SS.GW.offset);
+    }
+}
+
+void TextWindow::ScreenChangeImmediatelyEditDimension(int link, uint32_t v) {
+    SS.immediatelyEditDimension = !SS.immediatelyEditDimension;
+    SS.GW.Invalidate(/*clearPersistent=*/true);
 }
 
 void TextWindow::ScreenChangeShowContourAreas(int link, uint32_t v) {
     SS.showContourAreas = !SS.showContourAreas;
-    InvalidateGraphics();
+    SS.GW.Invalidate();
 }
 
 void TextWindow::ScreenChangeCheckClosedContour(int link, uint32_t v) {
     SS.checkClosedContour = !SS.checkClosedContour;
-    InvalidateGraphics();
+    SS.GW.Invalidate();
+}
+
+void TextWindow::ScreenChangeAutomaticLineConstraints(int link, uint32_t v) {
+    SS.automaticLineConstraints = !SS.automaticLineConstraints;
+    SS.GW.Invalidate();
 }
 
 void TextWindow::ScreenChangeShadedTriangles(int link, uint32_t v) {
     SS.exportShadedTriangles = !SS.exportShadedTriangles;
-    InvalidateGraphics();
+    SS.GW.Invalidate();
 }
 
 void TextWindow::ScreenChangePwlCurves(int link, uint32_t v) {
     SS.exportPwlCurves = !SS.exportPwlCurves;
-    InvalidateGraphics();
+    SS.GW.Invalidate();
 }
 
 void TextWindow::ScreenChangeCanvasSizeAuto(int link, uint32_t v) {
@@ -110,7 +138,7 @@ void TextWindow::ScreenChangeCanvasSizeAuto(int link, uint32_t v) {
     } else {
         SS.exportCanvasSizeAuto = false;
     }
-    InvalidateGraphics();
+    SS.GW.Invalidate();
 }
 
 void TextWindow::ScreenChangeCanvasSize(int link, uint32_t v) {
@@ -221,11 +249,20 @@ void TextWindow::ShowConfiguration() {
     Printf(false, "%Ba   %s %Fl%Ll%f%D[change]%E",
         SS.MmToString(SS.gridSpacing).c_str(),
         &ScreenChangeGridSpacing, 0);
+
+    Printf(false, "");
     Printf(false, "%Ft digits after decimal point to show%E");
-    Printf(false, "%Ba   %d %Fl%Ll%f%D[change]%E (e.g. '%s')",
+    Printf(false, "%Ba%Ft   distances: %Fd%d %Fl%Ll%f%D[change]%E (e.g. '%s')",
         SS.UnitDigitsAfterDecimal(),
         &ScreenChangeDigitsAfterDecimal, 0,
         SS.MmToString(SS.StringToMm("1.23456789")).c_str());
+    Printf(false, "%Bd%Ft   angles:    %Fd%d %Fl%Ll%f%D[change]%E (e.g. '%s')",
+        SS.afterDecimalDegree,
+        &ScreenChangeDigitsAfterDecimalDegree, 0,
+        SS.DegreeToString(1.23456789).c_str());
+    Printf(false, "  %Fd%f%Ll%s  use SI prefixes for distances%E",
+        &ScreenChangeUseSIPrefixes,
+        SS.useSIPrefixes ? CHECK_TRUE : CHECK_FALSE);
 
     Printf(false, "");
     Printf(false, "%Ft export scale factor (1:1=mm, 1:25.4=inch)");
@@ -305,7 +342,14 @@ void TextWindow::ShowConfiguration() {
     Printf(false, "  %Fd%f%Ll%s  show areas of closed contours%E",
         &ScreenChangeShowContourAreas,
         SS.showContourAreas ? CHECK_TRUE : CHECK_FALSE);
-
+    Printf(false, "  %Fd%f%Ll%s  enable automatic line constraints%E",
+        &ScreenChangeAutomaticLineConstraints,
+        SS.automaticLineConstraints ? CHECK_TRUE : CHECK_FALSE);
+    Printf(false, "  %Fd%f%Ll%s  use turntable mouse navigation%E", &ScreenChangeTurntableNav,
+        SS.turntableNav ? CHECK_TRUE : CHECK_FALSE);
+    Printf(false, "  %Fd%f%Ll%s  edit newly added dimensions%E",
+        &ScreenChangeImmediatelyEditDimension,
+        SS.immediatelyEditDimension ? CHECK_TRUE : CHECK_FALSE);
     Printf(false, "");
     Printf(false, "%Ft autosave interval (in minutes)%E");
     Printf(false, "%Ba   %d %Fl%Ll%f[change]%E",
@@ -321,26 +365,26 @@ void TextWindow::ShowConfiguration() {
     }
 }
 
-bool TextWindow::EditControlDoneForConfiguration(const char *s) {
+bool TextWindow::EditControlDoneForConfiguration(const std::string &s) {
     switch(edit.meaning) {
         case Edit::LIGHT_INTENSITY:
-            SS.lightIntensity[edit.i] = min(1.0, max(0.0, atof(s)));
-            InvalidateGraphics();
+            SS.lightIntensity[edit.i] = min(1.0, max(0.0, atof(s.c_str())));
+            SS.GW.Invalidate();
             break;
 
         case Edit::LIGHT_DIRECTION: {
             double x, y, z;
-            if(sscanf(s, "%lf, %lf, %lf", &x, &y, &z)==3) {
+            if(sscanf(s.c_str(), "%lf, %lf, %lf", &x, &y, &z)==3) {
                 SS.lightDir[edit.i] = Vector::From(x, y, z);
+                SS.GW.Invalidate();
             } else {
                 Error(_("Bad format: specify coordinates as x, y, z"));
             }
-            InvalidateGraphics();
             break;
         }
         case Edit::COLOR: {
             Vector rgb;
-            if(sscanf(s, "%lf, %lf, %lf", &rgb.x, &rgb.y, &rgb.z)==3) {
+            if(sscanf(s.c_str(), "%lf, %lf, %lf", &rgb.x, &rgb.y, &rgb.z)==3) {
                 rgb = rgb.ClampWithin(0, 1);
                 SS.modelColor[edit.i] = RGBf(rgb.x, rgb.y, rgb.z);
             } else {
@@ -350,44 +394,54 @@ bool TextWindow::EditControlDoneForConfiguration(const char *s) {
         }
         case Edit::CHORD_TOLERANCE: {
             if(edit.i == 0) {
-                SS.chordTol = max(0.0, atof(s));
+                SS.chordTol = max(0.0, atof(s.c_str()));
                 SS.GenerateAll(SolveSpaceUI::Generate::ALL);
             } else {
-                SS.exportChordTol = max(0.0, atof(s));
+                SS.exportChordTol = max(0.0, atof(s.c_str()));
             }
             break;
         }
         case Edit::MAX_SEGMENTS: {
             if(edit.i == 0) {
-                SS.maxSegments = min(1000, max(7, atoi(s)));
+                SS.maxSegments = min(1000, max(7, atoi(s.c_str())));
                 SS.GenerateAll(SolveSpaceUI::Generate::ALL);
             } else {
-                SS.exportMaxSegments = min(1000, max(7, atoi(s)));
+                SS.exportMaxSegments = min(1000, max(7, atoi(s.c_str())));
             }
             break;
         }
         case Edit::CAMERA_TANGENT: {
-            SS.cameraTangent = (min(2.0, max(0.0, atof(s))))/1000.0;
+            SS.cameraTangent = (min(2.0, max(0.0, atof(s.c_str()))))/1000.0;
+            SS.GW.Invalidate();
             if(!SS.usePerspectiveProj) {
                 Message(_("The perspective factor will have no effect until you "
                           "enable View -> Use Perspective Projection."));
             }
-            InvalidateGraphics();
             break;
         }
         case Edit::GRID_SPACING: {
             SS.gridSpacing = (float)min(1e4, max(1e-3, SS.StringToMm(s)));
-            InvalidateGraphics();
+            SS.GW.Invalidate();
             break;
         }
         case Edit::DIGITS_AFTER_DECIMAL: {
-            int v = atoi(s);
+            int v = atoi(s.c_str());
             if(v < 0 || v > 8) {
-                Error(_("Specify between 0 and 8 digits after the decimal."));
+                Error(_("Specify between 0 and %d digits after the decimal."), 8);
             } else {
                 SS.SetUnitDigitsAfterDecimal(v);
+                SS.GW.Invalidate();
             }
-            InvalidateGraphics();
+            break;
+        }
+        case Edit::DIGITS_AFTER_DECIMAL_DEGREE: {
+            int v = atoi(s.c_str());
+            if(v < 0 || v > 4) {
+                Error(_("Specify between 0 and %d digits after the decimal."), 4);
+            } else {
+                SS.afterDecimalDegree = v;
+                SS.GW.Invalidate();
+            }
             break;
         }
         case Edit::EXPORT_SCALE: {
@@ -455,11 +509,11 @@ bool TextWindow::EditControlDoneForConfiguration(const char *s) {
             break;
         }
         case Edit::AUTOSAVE_INTERVAL: {
-            int interval;
-            if(sscanf(s, "%d", &interval)==1) {
+            int interval = atoi(s.c_str());
+            if(interval) {
                 if(interval >= 1) {
                     SS.autosaveInterval = interval;
-                    SetAutosaveTimerFor(interval);
+                    SS.ScheduleAutosave();
                 } else {
                     Error(_("Bad value: autosave interval should be positive"));
                 }

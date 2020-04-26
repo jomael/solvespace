@@ -31,7 +31,7 @@ if(WIN32)
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
     endfunction()
 elseif(APPLE)
-    set(app_resource_dir ${CMAKE_BINARY_DIR}/bin/solvespace.app/Contents/Resources)
+    set(app_resource_dir ${CMAKE_BINARY_DIR}/bin/SolveSpace.app/Contents/Resources)
     set(cli_resource_dir ${CMAKE_BINARY_DIR}/res)
 
     function(add_resource name)
@@ -118,7 +118,7 @@ endfunction()
 # Second, register all resources.
 if(WIN32)
     add_resource(win32/icon.ico     4000 ICON)
-    add_resource(win32/manifest.xml 2    RT_MANIFEST)
+    add_resource(win32/manifest.xml 1    RT_MANIFEST)
 elseif(APPLE)
     add_iconset (cocoa/AppIcon.iconset)
     add_xib     (cocoa/MainMenu.xib)
@@ -126,25 +126,81 @@ elseif(APPLE)
 else()
     add_resource(freedesktop/solvespace-48x48.png)
 
-    configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/freedesktop/solvespace.desktop.in
-        ${CMAKE_CURRENT_BINARY_DIR}/freedesktop/solvespace.desktop)
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/freedesktop/solvespace.desktop
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+    if(FLATPAK)
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/freedesktop/solvespace-flatpak.desktop.in
+            ${CMAKE_CURRENT_BINARY_DIR}/freedesktop/solvespace-flatpak.desktop)
+        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/freedesktop/solvespace-flatpak.desktop
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
+            RENAME      com.solvespace.SolveSpace.desktop)
 
-    foreach(SIZE 16x16 24x24 32x32 48x48)
-        install(FILES freedesktop/solvespace-${SIZE}.png
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${SIZE}/apps
-            RENAME      solvespace.png)
-        install(FILES freedesktop/solvespace-${SIZE}.png
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${SIZE}/mimetypes
-            RENAME      application.x-solvespace.png)
-    endforeach()
+        install(FILES freedesktop/solvespace-flatpak-mime.xml
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/mime/packages
+            RENAME      com.solvespace.SolveSpace-slvs.xml)
 
-    foreach(SIZE 16x16 24x24 32x32 48x48)
-        install(FILES freedesktop/solvespace-${SIZE}.xpm
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps)
-    endforeach()
+        install(FILES freedesktop/solvespace-scalable.svg
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
+            RENAME      com.solvespace.SolveSpace.svg)
+        install(FILES freedesktop/solvespace-scalable.svg
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/mimetypes
+            RENAME      com.solvespace.SolveSpace.svg)
+
+        foreach(SIZE 16x16 24x24 32x32 48x48)
+            install(FILES freedesktop/solvespace-${SIZE}.png
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${SIZE}/apps
+                RENAME      com.solvespace.SolveSpace.png)
+            install(FILES freedesktop/solvespace-${SIZE}.png
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${SIZE}/mimetypes
+                RENAME      com.solvespace.SolveSpace.png)
+        endforeach()
+    elseif(SNAP)
+        install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/freedesktop/solvespace-snap.desktop
+            DESTINATION /
+            RENAME      solvespace.desktop)
+        
+        # snapd does not support registering new mime types
+
+        install(FILES freedesktop/solvespace-scalable.svg
+            DESTINATION /meta/icons/hicolor/scalable/apps
+            RENAME      snap.solvespace.svg)
+
+        foreach(SIZE 16x16 24x24 32x32 48x48)
+            install(FILES freedesktop/solvespace-${SIZE}.png
+                DESTINATION /meta/icons/hicolor/${SIZE}/apps
+                RENAME      snap.solvespace.png)
+        endforeach()
+    else()
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/freedesktop/solvespace.desktop.in
+            ${CMAKE_CURRENT_BINARY_DIR}/freedesktop/solvespace.desktop)
+        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/freedesktop/solvespace.desktop
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+
+        install(FILES freedesktop/solvespace-mime.xml
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/mime/packages
+            RENAME      solvespace-slvs.xml)
+        
+        install(FILES freedesktop/solvespace-scalable.svg
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
+            RENAME      solvespace.svg)
+        install(FILES freedesktop/solvespace-scalable.svg
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/mimetypes
+            RENAME      application.x-solvespace.svg)
+
+        foreach(SIZE 16x16 24x24 32x32 48x48)
+            install(FILES freedesktop/solvespace-${SIZE}.png
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${SIZE}/apps
+                RENAME      solvespace.png)
+            install(FILES freedesktop/solvespace-${SIZE}.png
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${SIZE}/mimetypes
+                RENAME      application.x-solvespace.png)
+        endforeach()
+
+        foreach(SIZE 16x16 24x24 32x32 48x48)
+            install(FILES freedesktop/solvespace-${SIZE}.xpm
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps)
+        endforeach()
+    endif()
 endif()
 
 add_resources(
@@ -182,6 +238,7 @@ add_resources(
     icons/graphics-window/trim.png
     icons/graphics-window/vert.png
     icons/text-window/constraint.png
+    icons/text-window/construction.png
     icons/text-window/edges.png
     icons/text-window/faces.png
     icons/text-window/occluded-visible.png
@@ -194,7 +251,9 @@ add_resources(
     icons/text-window/shaded.png
     icons/text-window/workplane.png
     locales.txt
+    locales/de_DE.po
     locales/en_US.po
+    locales/fr_FR.po
     locales/uk_UA.po
     locales/ru_RU.po
     fonts/unifont.hex.gz
@@ -207,6 +266,7 @@ add_resources(
     fonts/private/6-stipple-dash.png
     fonts/private/7-stipple-zigzag.png
     fonts/unicode.lff.gz
+    fonts/BitstreamVeraSans-Roman-builtin.ttf
     shaders/imesh.frag
     shaders/imesh.vert
     shaders/imesh_point.frag

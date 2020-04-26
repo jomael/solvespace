@@ -11,24 +11,20 @@
 std::string Constraint::Label() const {
     std::string result;
     if(type == Type::ANGLE) {
-        if(valA == floor(valA)) {
-            result = ssprintf("%.0f°", valA);
-        } else {
-            result = ssprintf("%.2f°", valA);
-        }
+        result = SS.DegreeToString(valA) + "°";
     } else if(type == Type::LENGTH_RATIO) {
         result = ssprintf("%.3f:1", valA);
     } else if(type == Type::COMMENT) {
         result = comment;
     } else if(type == Type::DIAMETER) {
         if(!other) {
-            result = "⌀" + SS.MmToString(valA);
+            result = "⌀" + SS.MmToStringSI(valA);
         } else {
-            result = "R" + SS.MmToString(valA / 2);
+            result = "R" + SS.MmToStringSI(valA / 2);
         }
     } else {
         // valA has units of distance
-        result = SS.MmToString(fabs(valA));
+        result = SS.MmToStringSI(fabs(valA));
     }
     if(reference) {
         result += " REF";
@@ -113,7 +109,7 @@ int Constraint::DoLineTrimmedAgainstBox(Canvas *canvas, Canvas::hStroke hcs,
     const Camera &camera = canvas->GetCamera();
     double th      = Style::TextHeight(GetStyle()) / camera.scale;
     double pixels  = 1.0 / camera.scale;
-    double swidth  = VectorFont::Builtin()->GetWidth(th, Label()) + 4 * pixels,
+    double swidth  = VectorFont::Builtin()->GetWidth(th, Label()) + 8 * pixels,
            sheight = VectorFont::Builtin()->GetCapHeight(th) + 8 * pixels;
     Vector gu = camera.projUp.WithMagnitude(1),
            gr = camera.projRight.WithMagnitude(1);
@@ -152,7 +148,7 @@ int Constraint::DoLineTrimmedAgainstBox(Canvas *canvas, Canvas::hStroke hcs,
         }
         if(j < 4) continue;
 
-        double t = (p.Minus(a)).DivPivoting(dl);
+        double t = (p.Minus(a)).DivProjected(dl);
         tmin = min(t, tmin);
         tmax = max(t, tmax);
     }
@@ -302,7 +298,7 @@ void Constraint::DoArcForAngle(Canvas *canvas, Canvas::hStroke hcs,
     Vector gr = camera.projRight.ScaledBy(1.0);
     Vector gu = camera.projUp.ScaledBy(1.0);
 
-    if(workplane.v != Entity::FREE_IN_3D.v) {
+    if(workplane != Entity::FREE_IN_3D) {
         a0 = a0.ProjectInto(workplane);
         b0 = b0.ProjectInto(workplane);
         da = da.ProjectVectorInto(workplane);
@@ -349,8 +345,8 @@ void Constraint::DoArcForAngle(Canvas *canvas, Canvas::hStroke hcs,
         double r = max(sqrt(rda*rda + rdna*rdna), 15.0 * pixels);
 
         double th = Style::TextHeight(GetStyle()) / camera.scale;
-        double swidth   = VectorFont::Builtin()->GetWidth(th, Label()) + 4*pixels,
-               sheight  = VectorFont::Builtin()->GetCapHeight(th) + 8*pixels;
+        double swidth   = VectorFont::Builtin()->GetWidth(th, Label()) + 8*pixels,
+               sheight  = VectorFont::Builtin()->GetCapHeight(th) + 6*pixels;
         double textR = sqrt(swidth * swidth + sheight * sheight) / 2.0;
         *ref = pi.Plus(rm.WithMagnitude(std::max(rm.Magnitude(), 15 * pixels + textR)));
 
@@ -412,7 +408,7 @@ void Constraint::DoArcForAngle(Canvas *canvas, Canvas::hStroke hcs,
             if(i > 0) {
                 if(trim) {
                     DoLineTrimmedAgainstBox(canvas, hcs, *ref, prev, p,
-                                            /*extend=*/false, gr, gu, swidth, sheight);
+                                            /*extend=*/false, gr, gu, swidth, sheight + 2*pixels);
                 } else {
                     DoLine(canvas, hcs, prev, p);
                 }
@@ -456,7 +452,7 @@ bool Constraint::IsVisible() const {
     if(!(g->visible)) return false;
     // And likewise if the group is not the active group; except for comments
     // with an assigned style.
-    if(g->h.v != SS.GW.activeGroup.v && !(type == Type::COMMENT && disp.style.v)) {
+    if(g->h != SS.GW.activeGroup && !(type == Type::COMMENT && disp.style.v)) {
         return false;
     }
     if(disp.style.v) {
@@ -533,7 +529,7 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
             Vector ap = SK.GetEntity(ptA)->PointGetNum();
             Vector bp = SK.GetEntity(ptB)->PointGetNum();
 
-            if(workplane.v != Entity::FREE_IN_3D.v) {
+            if(workplane != Entity::FREE_IN_3D) {
                 DoProjectedPoint(canvas, hcs, &ap);
                 DoProjectedPoint(canvas, hcs, &bp);
             }
@@ -600,7 +596,7 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
             Vector lB = SK.GetEntity(line->point[1])->PointGetNum();
             Vector dl = lB.Minus(lA);
 
-            if(workplane.v != Entity::FREE_IN_3D.v) {
+            if(workplane != Entity::FREE_IN_3D) {
                 lA = lA.ProjectInto(workplane);
                 lB = lB.ProjectInto(workplane);
                 DoProjectedPoint(canvas, hcs, &pt);
@@ -642,11 +638,11 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
                 }
             }
 
-            if(workplane.v != Entity::FREE_IN_3D.v) {
+            if(workplane != Entity::FREE_IN_3D) {
                 // Draw the projection marker from the closest point on the
                 // projected line to the projected point on the real line.
                 Vector lAB = (lA.Minus(lB));
-                double t = (lA.Minus(closest)).DivPivoting(lAB);
+                double t = (lA.Minus(closest)).DivProjected(lAB);
 
                 Vector lA = SK.GetEntity(line->point[0])->PointGetNum();
                 Vector lB = SK.GetEntity(line->point[1])->PointGetNum();
@@ -833,7 +829,7 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
         case Type::PERPENDICULAR: {
             Vector u = Vector::From(0, 0, 0), v = Vector::From(0, 0, 0);
             Vector rn, ru;
-            if(workplane.v == Entity::FREE_IN_3D.v) {
+            if(workplane == Entity::FREE_IN_3D) {
                 rn = gn;
                 ru = gu;
             } else {
@@ -886,7 +882,7 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
                 v = norm->NormalV();
             } else if(type == Type::CUBIC_LINE_TANGENT) {
                 Vector n;
-                if(workplane.v == Entity::FREE_IN_3D.v) {
+                if(workplane == Entity::FREE_IN_3D) {
                     u = gr;
                     v = gu;
                     n = gn;
@@ -989,7 +985,7 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
                 a = SK.GetEntity(e->point[0])->PointGetNum();
                 b = SK.GetEntity(e->point[1])->PointGetNum();
 
-                if(workplane.v != Entity::FREE_IN_3D.v) {
+                if(workplane != Entity::FREE_IN_3D) {
                     DoProjectedPoint(canvas, hcs, &a);
                     DoProjectedPoint(canvas, hcs, &b);
                 }
@@ -1009,7 +1005,7 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
             Entity *forLen = SK.GetEntity(entityA);
             Vector a = SK.GetEntity(forLen->point[0])->PointGetNum(),
                    b = SK.GetEntity(forLen->point[1])->PointGetNum();
-            if(workplane.v != Entity::FREE_IN_3D.v) {
+            if(workplane != Entity::FREE_IN_3D) {
                 DoProjectedPoint(canvas, hcs, &a);
                 DoProjectedPoint(canvas, hcs, &b);
             }
@@ -1021,7 +1017,7 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
             Vector la = SK.GetEntity(ln->point[0])->PointGetNum(),
                    lb = SK.GetEntity(ln->point[1])->PointGetNum();
             Vector pt = SK.GetEntity(ptA)->PointGetNum();
-            if(workplane.v != Entity::FREE_IN_3D.v) {
+            if(workplane != Entity::FREE_IN_3D) {
                 DoProjectedPoint(canvas, hcs, &pt);
                 la = la.ProjectInto(workplane);
                 lb = lb.ProjectInto(workplane);
@@ -1043,7 +1039,7 @@ void Constraint::DoLayout(DrawAs how, Canvas *canvas,
                 Entity *pte = SK.GetEntity(i == 0 ? ptA : ptB);
                 Vector pt = pte->PointGetNum();
 
-                if(workplane.v != Entity::FREE_IN_3D.v) {
+                if(workplane != Entity::FREE_IN_3D) {
                     DoProjectedPoint(canvas, hcs, &pt);
                     la = la.ProjectInto(workplane);
                     lb = lb.ProjectInto(workplane);
@@ -1108,7 +1104,7 @@ s:
         case Type::VERTICAL:
             if(entityA.v) {
                 Vector r, u, n;
-                if(workplane.v == Entity::FREE_IN_3D.v) {
+                if(workplane == Entity::FREE_IN_3D) {
                     r = gr; u = gu; n = gn;
                 } else {
                     r = SK.GetEntity(workplane)->Normal()->NormalU();
@@ -1175,7 +1171,7 @@ s:
 
         case Type::COMMENT: {
             Vector u, v;
-            if(workplane.v == Entity::FREE_IN_3D.v) {
+            if(workplane == Entity::FREE_IN_3D) {
                 u = gr;
                 v = gu;
             } else {

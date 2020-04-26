@@ -40,6 +40,8 @@ public:
 
     void ConvertTo(Format newFormat);
     void SetPixel(size_t x, size_t y, RgbaColor color);
+
+    std::shared_ptr<Pixmap> Copy();
 };
 
 class BitmapFont {
@@ -101,9 +103,9 @@ public:
     Vector GetExtents(double forCapHeight, const std::string &str);
 
     void Trace(double forCapHeight, Vector o, Vector u, Vector v, const std::string &str,
-               std::function<void(Vector, Vector)> traceEdge);
+               const std::function<void(Vector, Vector)> &traceEdge);
     void Trace(double forCapHeight, Vector o, Vector u, Vector v, const std::string &str,
-               std::function<void(Vector, Vector)> traceEdge, const Camera &camera);
+               const std::function<void(Vector, Vector)> &traceEdge, const Camera &camera);
 };
 
 #endif

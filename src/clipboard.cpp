@@ -12,16 +12,16 @@ void SolveSpaceUI::Clipboard::Clear() {
 }
 
 bool SolveSpaceUI::Clipboard::ContainsEntity(hEntity he) {
-    if(he.v == Entity::NO_ENTITY.v)
+    if(he == Entity::NO_ENTITY)
         return true;
 
     ClipboardRequest *cr;
     for(cr = r.First(); cr; cr = r.NextAfter(cr)) {
-        if(cr->oldEnt.v == he.v)
+        if(cr->oldEnt == he)
             return true;
 
         for(int i = 0; i < MAX_POINTS_IN_ENTITY; i++) {
-            if(cr->oldPointEnt[i].v == he.v)
+            if(cr->oldPointEnt[i] == he)
                 return true;
         }
     }
@@ -29,16 +29,16 @@ bool SolveSpaceUI::Clipboard::ContainsEntity(hEntity he) {
 }
 
 hEntity SolveSpaceUI::Clipboard::NewEntityFor(hEntity he) {
-    if(he.v == Entity::NO_ENTITY.v)
+    if(he == Entity::NO_ENTITY)
         return Entity::NO_ENTITY;
 
     ClipboardRequest *cr;
     for(cr = r.First(); cr; cr = r.NextAfter(cr)) {
-        if(cr->oldEnt.v == he.v)
+        if(cr->oldEnt == he)
             return cr->newReq.entity(0);
 
         for(int i = 0; i < MAX_POINTS_IN_ENTITY; i++) {
-            if(cr->oldPointEnt[i].v == he.v)
+            if(cr->oldPointEnt[i] == he)
                 return cr->newReq.entity(1+i);
         }
     }
@@ -170,9 +170,9 @@ void GraphicsWindow::PasteClipboard(Vector trans, double theta, double scale) {
             hRequest hr = he.request();
             Request *r = SK.GetRequest(hr);
             if(r->type == Request::Type::ARC_OF_CIRCLE) {
-                if(he.v == hr.entity(2).v) {
+                if(he == hr.entity(2)) {
                     return hr.entity(3);
-                } else if(he.v == hr.entity(3).v) {
+                } else if(he == hr.entity(3)) {
                     return hr.entity(2);
                 }
             }
@@ -287,7 +287,7 @@ void GraphicsWindow::MenuClipboard(Command id) {
         }
 
         case Command::PASTE_TRANSFORM: {
-            if(SS.clipboard.r.n == 0) {
+            if(SS.clipboard.r.IsEmpty()) {
                 Error(_("Clipboard is empty; nothing to paste."));
                 break;
             }
@@ -325,7 +325,7 @@ void GraphicsWindow::MenuClipboard(Command id) {
     }
 }
 
-bool TextWindow::EditControlDoneForPaste(const char *s) {
+bool TextWindow::EditControlDoneForPaste(const std::string &s) {
     Expr *e;
     switch(edit.meaning) {
         case Edit::PASTE_TIMES_REPEATED: {
@@ -349,7 +349,7 @@ bool TextWindow::EditControlDoneForPaste(const char *s) {
             e = Expr::From(s, /*popUpError=*/true);
             double v = e->Eval();
             if(fabs(v) > 1e-6) {
-                shown.paste.scale = v;
+                shown.paste.scale = shown.paste.scale < 0 ? -v : v;
             } else {
                 Error(_("Scale cannot be zero."));
             }
@@ -375,8 +375,12 @@ void TextWindow::ScreenChangePasteTransformed(int link, uint32_t v) {
             break;
 
         case 's':
-            SS.TW.ShowEditControl(13, ssprintf("%.3f", SS.TW.shown.paste.scale));
+            SS.TW.ShowEditControl(13, ssprintf("%.3f", fabs(SS.TW.shown.paste.scale)));
             SS.TW.edit.meaning = Edit::PASTE_SCALE;
+            break;
+
+        case 'f':
+            SS.TW.shown.paste.scale *= -1;
             break;
     }
 }
@@ -466,8 +470,11 @@ void TextWindow::ShowPasteTransformed() {
             SS.MmToString(shown.paste.trans.z).c_str(),
         &ScreenPasteTransformed);
     Printf(false, "%Ba   %Ftscale%E     %@ %Fl%Ls%f[change]%E",
-        shown.paste.scale,
+        fabs(shown.paste.scale),
         &ScreenChangePasteTransformed);
+    Printf(false, "%Ba   %Ftmirror%E    %Fd%Lf%f%s  flip%E",
+        &ScreenChangePasteTransformed,
+        shown.paste.scale < 0 ? CHECK_TRUE : CHECK_FALSE);
 
     Printf(true, " %Fl%Lg%fpaste transformed now%E", &ScreenPasteTransformed);
 
